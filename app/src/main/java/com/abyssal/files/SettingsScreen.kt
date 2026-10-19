@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.sp
 
 private val PRESETS = listOf(
     0xFFA324EC, 0xFF4DA3FF, 0xFF2DD4BF, 0xFF4CAF7A, 0xFFA3E635,
-    0xFFFFC83D, 0xFFFF8A3D, 0xFFFF5C7A, 0xFFF472B6, 0xFFC9CDD6,
+    0xFFFFC83D, 0xFFFF8A3D, 0xFFFF5C7A, 0xFFF472B6, 0xFFC9CDD6, 0xFF4E4E4E,
 ).map { Color(it) }
 
 @Composable
