@@ -259,9 +259,10 @@ fun EditorScreen(
                     TextButton({ onOpenWith(file) }) { Text("Open with another app") }
                 }
                 is Doc.Ready -> Column(Modifier.fillMaxSize()) {
-                    if (d.truncated || d.readOnly || req.readOnly) {
+                    if (d.truncated || d.readOnly || req.readOnly || req.note != null) {
                         Text(
                             when {
+                                req.note != null -> req.note
                                 req.readOnly -> "Opened from an archive · read-only"
                                 d.truncated -> "Showing the first 4 MB · read-only"
                                 !file.canWrite() -> "Read-only file"

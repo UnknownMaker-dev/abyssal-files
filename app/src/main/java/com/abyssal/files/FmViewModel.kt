@@ -1,6 +1,7 @@
 package com.abyssal.files
 
 import android.app.Application
+import android.net.Uri
 import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +28,14 @@ sealed interface Screen {
 }
 
 data class Clip(val files: List<String>, val cut: Boolean)
-data class EditRequest(val path: String, val edit: Boolean, val readOnly: Boolean = false)
+/** [note] is shown above the text; [writeBack] is the other app's file that saving also updates. */
+data class EditRequest(
+    val path: String,
+    val edit: Boolean,
+    val readOnly: Boolean = false,
+    val note: String? = null,
+    val writeBack: Uri? = null,
+)
 
 /** Where "Extract" puts the files: next to the archive, in a folder named after it, or a chosen folder. */
 enum class ExtractMode { HERE, NAMED, TO }
@@ -58,6 +66,22 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     /** Full-screen image/video/archive viewers, topmost last. */
     var viewers by mutableStateOf<List<Viewer>>(emptyList()); private set
 
+    /** Another app asked us for files: tapping a file returns it instead of opening it. */
+    var pick by mutableStateOf<PickRequest?>(null); private set
+    /** What the user picked (empty = cancelled); the activity hands it back and closes. */
+    var pickResult by mutableStateOf<List<String>?>(null); private set
+    /** Opened by another app's "Open with" to show one file; the activity closes along with it. */
+    var external by mutableStateOf(false); private set
+    var opening by mutableStateOf(false); private set
+    var openError by mutableStateOf<String?>(null); private set
+    private var savingBack by mutableStateOf(false)
+    private var started = false
+
+    /** The file another app sent was closed: time to go back to that app. */
+    val externalDone: Boolean
+        get() = external && !opening && openError == null && !savingBack &&
+            editing == null && viewers.isEmpty() && player.current == null
+
     private var job: Job? = null
     private var searchJob: Job? = null
     private var iconsLoaded = false
@@ -82,11 +106,83 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         goHome()
-        // Files opened from archives are temporary
-        viewModelScope.launch(Dispatchers.IO) { File(app.cacheDir, "zipview").deleteRecursively() }
+        // Files opened from archives or sent by other apps are temporary
+        viewModelScope.launch(Dispatchers.IO) { Incoming.cleanCache(app) }
     }
 
     fun openViewer(v: Viewer) { viewers = viewers + v }
+
+    // ---- other apps ----
+    fun startPick(r: PickRequest) {
+        if (started) return
+        started = true
+        pick = r
+    }
+
+    /** [paths] null = cancelled. */
+    fun finishPick(paths: List<String>?) { pickResult = paths.orEmpty() }
+
+    /**
+     * Opens a file another app sent. With all-files access ([direct]) the real file is used when it can be
+     * found, so edits save in place; otherwise we work on a copy and save it back through [uri] if [writable].
+     */
+    fun openIncoming(uri: Uri, mime: String?, edit: Boolean, writable: Boolean, direct: Boolean) {
+        if (started) return
+        started = true; external = true; opening = true
+        val ctx = getApplication<Application>()
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val real = if (direct) Incoming.realFile(ctx, uri) else null
+                    real?.let { it to null } ?: (Incoming.copy(ctx, uri, Incoming.nameFor(ctx, uri, mime)) to uri)
+                }
+            }
+            r.onSuccess { (f, source) -> showIncoming(f, source, edit, writable) }
+                .onFailure { openError = if (it is java.io.FileNotFoundException) "File not found" else "Can't open this file" }
+            opening = false
+        }
+    }
+
+    private suspend fun showIncoming(f: File, source: Uri?, edit: Boolean, writable: Boolean) {
+        val item = FileItem.of(f)
+        // A real file can be swiped/played along with the rest of its folder
+        val folder = if (source != null) listOf(item) else withContext(Dispatchers.IO) {
+            f.parentFile?.let { FileOps.list(it, showHidden, sort, sortReversed) }.orEmpty()
+        }
+        fun queue(k: Kind): Pair<List<String>, Int> {
+            val q = folder.filter { it.kind == k }.map { it.path }
+            val i = q.indexOf(f.path)
+            return if (i >= 0) q to i else listOf(f.path) to 0
+        }
+        when {
+            item.kind == Kind.IMAGE -> queue(Kind.IMAGE).let { (q, i) -> openViewer(Viewer.Images(q, i)) }
+            item.kind == Kind.VIDEO -> queue(Kind.VIDEO).let { (q, i) -> openViewer(Viewer.Videos(q, i)) }
+            item.kind == Kind.AUDIO -> queue(Kind.AUDIO).let { (q, i) -> player.play(q, i) }
+            item.ext in FileOps.ZIP_BROWSE -> openViewer(Viewer.Zip(f.path))
+            source == null -> editing = EditRequest(f.path, edit)
+            else -> editing = EditRequest(
+                f.path, edit && writable, readOnly = !writable,
+                note = if (writable) "From another app · saving updates the original" else "From another app · read-only",
+                writeBack = source.takeIf { writable },
+            )
+        }
+    }
+
+    /** After the editor saved a copy, sends it back to the app it came from. */
+    fun saveBack(req: EditRequest) {
+        val uri = req.writeBack ?: return
+        savingBack = true
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { Incoming.writeBack(getApplication(), File(req.path), uri) } }
+            r.onFailure {
+                val msg = "Couldn't save to the other app: ${it.message}"
+                if (editing == null) openError = msg else message = msg
+            }
+            savingBack = false
+        }
+    }
+
+    fun dismissOpenError() { openError = null }
     fun closeViewer() { viewers = viewers.dropLast(1) }
 
     fun onResume() {

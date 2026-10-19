@@ -37,6 +37,9 @@ Created by Jh0nzxx and Unknown Maker
     - JS/TS: Script API autocomplete for `@minecraft/server` and `@minecraft/server-ui` that follows the code — `world.afterEvents.…`, event callback parameters (`({ player }) => player.…`), variables (`const dim = world.getDimension(…)`), `getComponent("inventory").container.…`, enums, and string values (item/entity ids, effects, sounds, particles, commands, modules), plus snippets (forms, events, `runInterval`, custom components…)
     - JSON: keys and values by position in the file (manifest, entities, items, blocks, recipes, loot tables, spawn rules, client entities, filters…), with ready-to-edit default values; in an empty file, whole templates (`manifest_bp`, `manifest_rp`, `manifest_script`, `entity`, `item`, `block`, `recipe_shaped`, `loot_table`) with freshly generated UUIDs
 - Built-in audio player
+- Works with other apps:
+  - **"Open from" / file pickers**: Abyssal Files is listed when another app asks for a file (Android's "Browse files in other apps"). It opens in pick mode: tap a file to send it back, or tap several and press **Select** when the app accepts more than one. Files of other types are dimmed.
+  - **"Open with" / "Edit with"**: text, code, JSON, images, videos, audio and archives (.zip, .mcpack, .mcaddon, .mcworld…) from other apps open straight in the editor, image viewer, video player, audio player or archive browser; closing it goes back to that app. Files on your storage are edited in place; files that only exist inside another app are edited as a copy and saved back when that app allows it (otherwise they open read-only).
 - New files with any extension
 - Accent colour picker: the whole dark theme **and the icons** follow it
 

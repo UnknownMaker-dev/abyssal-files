@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -74,7 +75,7 @@ fun FileManagerApp(vm: FmViewModel) {
             edit != null -> EditorScreen(
                 req = edit,
                 onClose = { vm.closeEditor() },
-                onSaved = { vm.refresh() },
+                onSaved = { vm.refresh(); vm.saveBack(edit) },
                 onOpenWith = { openWith(ctx, it) { m -> vm.message = m } },
                 onMsg = { vm.message = it },
             )
@@ -83,8 +84,10 @@ fun FileManagerApp(vm: FmViewModel) {
                 is Viewer.Videos -> VideoPlayer(v, vm)
                 is Viewer.Zip -> ZipViewer(v, vm) { dlg = it }
             }
+            vm.external -> ExternalScreen(vm)
             vm.settingsOpen -> SettingsScreen(vm)
             else -> Column(Modifier.fillMaxSize().systemBarsPadding()) {
+                vm.pick?.let { PickBanner(vm, it) }
                 Box(Modifier.weight(1f)) {
                     when (vm.screen) {
                         Screen.Home -> HomeScreen(vm)
@@ -365,8 +368,15 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
             if (vm.busy || vm.searching) LinearProgressIndicator(Modifier.fillMaxSize(), color = Accent, trackColor = Color.Transparent)
         }
 
+        val pick = vm.pick
         val onClick: (FileItem) -> Unit = { item ->
             when {
+                pick != null && !item.isDir -> when {
+                    !pick.accepts(item) -> vm.message = "Choose ${pick.noun}"
+                    pick.multiple -> vm.toggle(item)
+                    else -> vm.finishPick(listOf(item.path))
+                }
+                pick != null -> vm.openDir(File(item.path))
                 sel.isNotEmpty() -> vm.toggle(item)
                 item.isDir -> vm.openDir(File(item.path))
                 item.kind == Kind.AUDIO -> {
@@ -386,6 +396,13 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
                 else -> openFile(ctx, File(item.path)) { vm.message = it }
             }
         }
+        val onLong: (FileItem) -> Unit = { item ->
+            when {
+                pick == null -> vm.toggle(item)
+                pick.multiple && pick.accepts(item) -> vm.toggle(item)
+                else -> onClick(item)
+            }
+        }
         val deep = vm.deepSearch
 
         @Composable
@@ -394,15 +411,16 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
             selected = item.path in sel,
             favorite = item.isDir && vm.isFavorite(item.path),
             location = location,
+            enabled = pick == null || item.isDir || pick.accepts(item),
             onClick = { onClick(item) },
-            onLong = { vm.toggle(item) },
+            onLong = { onLong(item) },
         )
 
         val cat = vm.screen as? Screen.Category
         val noun = if (cat?.exts === FileOps.VIDEOS) "video" else "photo"
         Box(Modifier.weight(1f)) {
             if (cat != null && cat.album != null) {
-                MediaGrid(list, sel, onClick = onClick, onLong = { vm.toggle(it) })
+                MediaGrid(list, sel, onClick = onClick, onLong = onLong)
             } else if (cat != null && cat.albums && vm.query.isNullOrBlank()) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
                 AlbumGrid(vm, groups, noun)
@@ -434,8 +452,9 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
         }
 
         when {
+            sel.isNotEmpty() && pick != null -> PickBar(vm, pick)
             sel.isNotEmpty() -> ActionBar(vm, ctx, onDlg)
-            vm.clip != null && vm.screen is Screen.Dir -> PasteBar(vm)
+            vm.clip != null && vm.screen is Screen.Dir && pick == null -> PasteBar(vm)
         }
     }
 }
@@ -573,7 +592,7 @@ private fun SearchField(value: String, hint: String, onChange: (String) -> Unit)
 @Composable
 private fun FileRow(
     item: FileItem, selected: Boolean, favorite: Boolean, location: String?,
-    onClick: () -> Unit, onLong: () -> Unit,
+    enabled: Boolean = true, onClick: () -> Unit, onLong: () -> Unit,
 ) {
     val date = FileOps.fmtDate(item.modified)
     val sub = (if (item.isDir) "${item.count} items · $date" else "${FileOps.fmtSize(item.size)} · $date") +
@@ -582,6 +601,7 @@ private fun FileRow(
         Modifier.fillMaxWidth()
             .background(if (selected) Accent.copy(alpha = 0.18f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLong)
+            .alpha(if (enabled) 1f else 0.38f)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -788,6 +808,77 @@ private fun PlayerBar(p: AudioPlayer) {
             colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = Panel),
             modifier = Modifier.fillMaxWidth().padding(end = 8.dp).height(30.dp),
         )
+    }
+}
+
+// ───────────────────────── other apps ─────────────────────────
+
+/** Shown while another app is waiting for us to pick files. */
+@Composable
+private fun PickBanner(vm: FmViewModel, p: PickRequest) {
+    Row(
+        Modifier.fillMaxWidth().background(Accent.copy(alpha = 0.16f)).heightIn(min = 48.dp).padding(end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton({ vm.finishPick(null) }, Modifier.size(44.dp)) { Icon(Icons.Default.Close, "Cancel", tint = Ink) }
+        Column(Modifier.weight(1f)) {
+            Text("Choose ${p.noun}", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Ink)
+            p.caller?.let { Text("for $it", fontSize = 11.sp, color = Dim, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+        if (p.multiple) Text("Tap to select", fontSize = 11.sp, color = Dim)
+    }
+}
+
+@Composable
+private fun PickBar(vm: FmViewModel, p: PickRequest) {
+    val chosen = vm.selectedItems.filter { p.accepts(it) }
+    val ok = chosen.isNotEmpty() && (p.multiple || chosen.size == 1)
+    Row(
+        Modifier.fillMaxWidth().height(58.dp).background(Panel).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(plural(chosen.size, "file") + " chosen", fontSize = 14.sp, color = Ink, modifier = Modifier.weight(1f))
+        Button(
+            { vm.finishPick(chosen.map { it.path }) }, enabled = ok,
+            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = OnAccent),
+        ) { Text("Select") }
+    }
+}
+
+/** Opened by another app: only the file itself (viewer, editor or player) is shown, never the browser. */
+@Composable
+private fun ExternalScreen(vm: FmViewModel) {
+    val err = vm.openError
+    val song = vm.player.current
+    Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        Column(
+            Modifier.weight(1f).fillMaxWidth().padding(32.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            when {
+                err != null -> {
+                    Logo(72.dp)
+                    Spacer(Modifier.height(16.dp))
+                    Text(err, color = Danger, fontSize = 14.sp)
+                    Spacer(Modifier.height(12.dp))
+                    TextButton({ vm.dismissOpenError() }) { Text("Close") }
+                }
+                song != null -> {
+                    PixIcon(IconMap.forFile(song.name, song.extension.lowercase()), 96.dp)
+                    Spacer(Modifier.height(16.dp))
+                    Text(song.nameWithoutExtension, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                else -> {
+                    Logo(72.dp)
+                    Spacer(Modifier.height(16.dp))
+                    CircularProgressIndicator(color = Accent)
+                    Spacer(Modifier.height(12.dp))
+                    Text("Opening…", color = Dim, fontSize = 14.sp)
+                }
+            }
+        }
+        PlayerBar(vm.player)
     }
 }
 
