@@ -1,0 +1,21 @@
+# Gradle / Kotlin
+.gradle/
+.kotlin/
+build/
+/app/build/
+
+# Local machine
+local.properties
+*.iml
+.idea/
+.DS_Store
+captures/
+
+# Signing
+*.jks
+*.keystore
+
+# Built APKs (published as GitHub Releases)
+dist/
+*.apk
+*.aab

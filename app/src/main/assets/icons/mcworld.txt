@@ -1,0 +1,31 @@
+# Abyssal Files pixel icon. Each character of the grid is one pixel, '.' is transparent.
+# Colours: #RRGGBB, @accent (theme colour) or @type (this icon's own colour - it becomes
+# the theme colour when Settings > Icon colours is "Theme colour").
+# "*0.5" darkens and "+0.5" lightens a colour (0..1).
+# Put an edited copy (or a PNG with the same name) in Internal storage/AbyssalFiles/icons
+# and press Settings > Reload icons to replace it without rebuilding.
+
+type = #5BAE3C
+G = @type
+H = @type+0.25
+D = @type*0.72
+B = #8B5A2B
+C = #6B4220
+E = #55361A
+
+................
+......GGGH......
+....GGDHGGHG....
+..HGGGGGGGGHGG..
+GDHGGHHHGHHGGGG.
+GGGHDGGGGHGHGDD.
+BGGGGGHHHGGDDDD.
+BBCGGGGGGDDDDCC.
+CBBGBGGGDDDDDCC.
+BBCBBBBGDCDCEEC.
+BBCBCBBBCCCECCC.
+BBBBBCBBCCCCCCC.
+..BBBBBCCCCECC..
+....BBBBCCCC....
+......BBCE......
+................
