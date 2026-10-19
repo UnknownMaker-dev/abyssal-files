@@ -75,6 +75,15 @@ fun SettingsScreen(vm: FmViewModel) {
                 }
             }
 
+            Label("View")
+            Card {
+                ViewOptions(vm)
+                Text(
+                    "List or grid, and how big files, photos and albums are shown. You can also pinch any list to resize it.",
+                    color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+
             Label("Files")
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {

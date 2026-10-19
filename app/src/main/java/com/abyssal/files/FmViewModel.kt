@@ -56,6 +56,8 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     var showHidden by mutableStateOf(prefs.showHidden); private set
     var sort by mutableStateOf(prefs.sort); private set
     var sortReversed by mutableStateOf(prefs.sortReversed); private set
+    var viewMode by mutableStateOf(prefs.viewMode); private set
+    var viewSize by mutableStateOf(prefs.viewSize); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null)
     var favorites by mutableStateOf(prefs.favorites); private set
@@ -299,6 +301,15 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleReversed() { changeSort(sort) }
+
+    fun changeViewMode(m: ViewMode) { viewMode = m; prefs.viewMode = m }
+    fun changeViewSize(s: ViewSize) { viewSize = s; prefs.viewSize = s }
+
+    /** Pinch steps: +1 bigger, -1 smaller. */
+    fun resizeView(step: Int) {
+        val all = ViewSize.entries
+        changeViewSize(all[(viewSize.ordinal + step).coerceIn(0, all.lastIndex)])
+    }
 
     fun toggleHidden() { showHidden = !showHidden; prefs.showHidden = showHidden; refresh(); rerunSearch() }
 

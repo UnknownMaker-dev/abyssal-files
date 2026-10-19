@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -41,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -412,18 +415,44 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
             favorite = item.isDir && vm.isFavorite(item.path),
             location = location,
             enabled = pick == null || item.isDir || pick.accepts(item),
+            size = vm.viewSize,
             onClick = { onClick(item) },
             onLong = { onLong(item) },
         )
 
+        @Composable
+        fun ItemTile(item: FileItem, location: String?) = FileTile(
+            item = item,
+            size = vm.viewSize,
+            selected = item.path in sel,
+            favorite = item.isDir && vm.isFavorite(item.path),
+            location = location,
+            enabled = pick == null || item.isDir || pick.accepts(item),
+            onClick = { onClick(item) },
+            onLong = { onLong(item) },
+        )
+        val grid = vm.viewMode == ViewMode.GRID
+        val gridCells = GridCells.Adaptive(vm.viewSize.tile)
+        val gridPad = PaddingValues(6.dp)
+
         val cat = vm.screen as? Screen.Category
         val noun = if (cat?.exts === FileOps.VIDEOS) "video" else "photo"
-        Box(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f).pinchToResize { vm.resizeView(it) }) {
             if (cat != null && cat.album != null) {
-                MediaGrid(list, sel, onClick = onClick, onLong = onLong)
+                MediaGrid(list, sel, vm.viewSize.media, onClick = onClick, onLong = onLong)
             } else if (cat != null && cat.albums && vm.query.isNullOrBlank()) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
-                AlbumGrid(vm, groups, noun)
+                AlbumGrid(vm, groups, noun, vm.viewSize.album)
+            } else if (cat != null && grid) {
+                val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
+                LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), contentPadding = gridPad) {
+                    groups.forEach { (folder, items) ->
+                        item(key = "h:$folder", span = { GridItemSpan(maxLineSpan) }) {
+                            GroupHeader(vm.displayName(folder), vm.displayPath(folder), items.size) { vm.openDir(File(folder)) }
+                        }
+                        items(items, key = { it.path }) { ItemTile(it, null) }
+                    }
+                }
             } else if (cat != null) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
                 LazyColumn(Modifier.fillMaxSize()) {
@@ -435,15 +464,22 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
                     }
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    if (deep) item(key = "search-info") {
-                        Text(
-                            if (vm.searching) "Searching in all subfolders… ${list.size} found"
-                            else "${list.size} result(s) in this folder and its subfolders",
-                            color = Dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
+                @Composable
+                fun SearchInfo() = Text(
+                    if (vm.searching) "Searching in all subfolders… ${list.size} found"
+                    else "${list.size} result(s) in this folder and its subfolders",
+                    color = Dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+                if (grid) {
+                    LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), contentPadding = gridPad) {
+                        if (deep) item(key = "search-info", span = { GridItemSpan(maxLineSpan) }) { SearchInfo() }
+                        items(list, key = { it.path }) { ItemTile(it, if (deep) vm.relativeParent(it) else null) }
                     }
-                    items(list, key = { it.path }) { ItemRow(it, if (deep) vm.relativeParent(it) else null) }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        if (deep) item(key = "search-info") { SearchInfo() }
+                        items(list, key = { it.path }) { ItemRow(it, if (deep) vm.relativeParent(it) else null) }
+                    }
                 }
             }
             if (list.isEmpty() && !vm.busy && !vm.searching) {
@@ -498,6 +534,16 @@ private fun BrowserTopBar(vm: FmViewModel, onDlg: (Dlg) -> Unit) {
         }
         if (vm.query == null) {
             IconButton(onClick = { vm.search("") }, Modifier.size(44.dp)) { Icon(Icons.Default.Search, "Search", tint = Ink) }
+            val cat = vm.screen as? Screen.Category
+            if (cat == null || !cat.albums) {
+                val grid = vm.viewMode == ViewMode.GRID
+                IconButton(onClick = { vm.changeViewMode(if (grid) ViewMode.LIST else ViewMode.GRID) }, Modifier.size(44.dp)) {
+                    Icon(
+                        if (grid) Icons.AutoMirrored.Outlined.ViewList else Icons.Outlined.GridView,
+                        if (grid) "List view" else "Grid view", tint = Ink,
+                    )
+                }
+            }
             if (isDir) {
                 val fav = vm.isFavorite(vm.dir.path)
                 IconButton(onClick = { vm.toggleFavorite(vm.dir.path) }, Modifier.size(44.dp)) {
@@ -510,6 +556,9 @@ private fun BrowserTopBar(vm: FmViewModel, onDlg: (Dlg) -> Unit) {
         Box {
             IconButton(onClick = { menu = true }, Modifier.size(44.dp)) { Icon(Icons.Default.MoreVert, "More", tint = Ink) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                Text("View · pinch to resize", color = Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp))
+                ViewOptions(vm, Modifier.width(260.dp).padding(horizontal = 12.dp))
+                HorizontalDivider(color = Panel, modifier = Modifier.padding(top = 8.dp))
                 if (isDir) {
                     MenuItem("New folder") { onDlg(Dlg.NewFolder); menu = false }
                     MenuItem("New file") { onDlg(Dlg.NewFile); menu = false }
@@ -592,7 +641,7 @@ private fun SearchField(value: String, hint: String, onChange: (String) -> Unit)
 @Composable
 private fun FileRow(
     item: FileItem, selected: Boolean, favorite: Boolean, location: String?,
-    enabled: Boolean = true, onClick: () -> Unit, onLong: () -> Unit,
+    enabled: Boolean = true, size: ViewSize = ViewSize.MEDIUM, onClick: () -> Unit, onLong: () -> Unit,
 ) {
     val date = FileOps.fmtDate(item.modified)
     val sub = (if (item.isDir) "${item.count} items · $date" else "${FileOps.fmtSize(item.size)} · $date") +
@@ -602,14 +651,17 @@ private fun FileRow(
             .background(if (selected) Accent.copy(alpha = 0.18f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLong)
             .alpha(if (enabled) 1f else 0.38f)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = size.listPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FileIcon(item, 38.dp)
+        FileIcon(item, size.listIcon)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.name, fontSize = 14.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(sub, fontSize = 11.sp, color = Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                item.name, fontSize = size.nameSp.sp, color = Ink, overflow = TextOverflow.Ellipsis,
+                maxLines = if (size >= ViewSize.LARGE) 2 else 1,
+            )
+            Text(sub, fontSize = size.subSp.sp, color = Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (favorite) Icon(Icons.Filled.Star, "Favorite", tint = Gold, modifier = Modifier.size(16.dp))
     }
@@ -619,9 +671,9 @@ private fun plural(n: Int, noun: String) = "$n $noun" + if (n == 1) "" else "s"
 
 /** Photos/Videos: one card per folder, newest item as cover, like a gallery app. */
 @Composable
-private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>>, noun: String) {
+private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>>, noun: String, cell: Dp) {
     LazyVerticalGrid(
-        GridCells.Adaptive(150.dp),
+        GridCells.Adaptive(cell),
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -651,9 +703,9 @@ private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>
 
 /** Inside an album: square thumbnails; long-press selects. */
 @Composable
-private fun MediaGrid(list: List<FileItem>, sel: Set<String>, onClick: (FileItem) -> Unit, onLong: (FileItem) -> Unit) {
+private fun MediaGrid(list: List<FileItem>, sel: Set<String>, cell: Dp, onClick: (FileItem) -> Unit, onLong: (FileItem) -> Unit) {
     LazyVerticalGrid(
-        GridCells.Adaptive(110.dp),
+        GridCells.Adaptive(cell),
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -665,7 +717,7 @@ private fun MediaGrid(list: List<FileItem>, sel: Set<String>, onClick: (FileItem
                 Modifier.aspectRatio(1f)
                     .combinedClickable(onClick = { onClick(item) }, onLongClick = { onLong(item) }),
             ) {
-                MediaThumb(item, Modifier.fillMaxSize().padding(if (selected) 8.dp else 0.dp).clip(RoundedCornerShape(if (selected) 10.dp else 0.dp)), px = 260)
+                MediaThumb(item, Modifier.fillMaxSize().padding(if (selected) 8.dp else 0.dp).clip(RoundedCornerShape(if (selected) 10.dp else 0.dp)), px = if (cell > 140.dp) 400 else 260)
                 if (selected) {
                     Icon(
                         Icons.Filled.CheckCircle, "Selected", tint = Accent,

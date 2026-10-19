@@ -22,6 +22,14 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("sortReversed", false)
         set(v) = sp.edit().putBoolean("sortReversed", v).apply()
 
+    var viewMode: ViewMode
+        get() = runCatching { ViewMode.valueOf(sp.getString("viewMode", null)!!) }.getOrDefault(ViewMode.LIST)
+        set(v) = sp.edit().putString("viewMode", v.name).apply()
+
+    var viewSize: ViewSize
+        get() = runCatching { ViewSize.valueOf(sp.getString("viewSize", null)!!) }.getOrDefault(ViewSize.MEDIUM)
+        set(v) = sp.edit().putString("viewSize", v.name).apply()
+
     var colorfulIcons: Boolean
         get() = sp.getBoolean("colorfulIcons", false)
         set(v) = sp.edit().putBoolean("colorfulIcons", v).apply()

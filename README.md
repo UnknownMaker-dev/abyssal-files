@@ -18,6 +18,7 @@ Created by Jh0nzxx and Unknown Maker
 - Home: internal storage + SD card / USB drives (same GB numbers as Android's Settings), favorites, categories, recent folders, quick access
 - Images and Videos open as a gallery: one album per folder (cover = newest item, name, count, SD badge); tap an album for a thumbnail grid, long-press an album to open its folder
 - The other categories (Audio, Documents, …) are grouped by the folder that holds the files
+- **List or grid view** (button in the top bar, ⋮ menu or Settings → View) in 4 sizes (S, M, L, XL); pinch with two fingers to resize. The size also applies to photo grids and albums
 - Search looks through the current folder **and all its subfolders**
 - Sort by name, date, size or type, in either direction (newest/oldest first, A→Z/Z→A…)
 - Date and time on every row; **Properties** with size, contents, path, access, dimensions, duration…
