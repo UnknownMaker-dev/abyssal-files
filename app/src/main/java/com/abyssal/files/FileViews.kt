@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -113,12 +112,12 @@ fun FileTile(
         Box(Modifier.fillMaxWidth().aspectRatio(1f), contentAlignment = Alignment.Center) {
             if (item.kind == Kind.IMAGE || item.kind == Kind.VIDEO) {
                 MediaThumb(item, Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)), px = if (size >= ViewSize.LARGE) 400 else 260)
+            } else if (item.isDir) {
+                FolderIcon(item.path, item.name, size.tile * 0.62f)
             } else {
                 PixIcon(IconMap.of(item), size.tile * 0.62f)
             }
-            if (favorite) {
-                Icon(Icons.Filled.Star, "Favorite", tint = Gold, modifier = Modifier.align(Alignment.TopStart).size(16.dp))
-            }
+            if (favorite) PixIcon("star", 18.dp, Modifier.align(Alignment.TopStart))
             if (selected) {
                 Icon(
                     Icons.Filled.CheckCircle, "Selected", tint = Accent,

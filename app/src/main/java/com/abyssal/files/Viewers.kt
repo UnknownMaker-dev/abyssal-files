@@ -2,6 +2,8 @@
 
 package com.abyssal.files
 
+import android.net.Uri
+import android.content.Intent
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -374,20 +376,40 @@ fun VideoPlayer(v: Viewer.Videos, vm: FmViewModel) {
             modifier = Modifier.align(Alignment.Center).aspectRatio(ratio),
         )
 
+        // Links from other apps stream; "Open with" hands the link itself to another app
+        val stream = path.startsWith("http://") || path.startsWith("https://")
+        val openElsewhere = {
+            if (stream) runCatching {
+                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(path)), "Open with"))
+            }.onFailure { vm.message = "Can't open: ${it.message}" }
+            else openWith(ctx, file) { vm.message = it }
+        }
+        if (stream) LaunchedEffect(path) {
+            delay(30_000)
+            if (!prepared && error == null) error = "Couldn't load this video"
+        }
+        if (!prepared && error == null) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center), color = Accent)
+        }
+
         error?.let { msg ->
             Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(msg, color = Color.White, fontSize = 15.sp)
-                TextButton({ openWith(ctx, file) { vm.message = it } }) { Text("Open with another app") }
+                TextButton({ openElsewhere() }) { Text("Open with another app") }
             }
         }
 
         if (chrome) {
             ViewerBar(
-                file.name,
-                if (v.paths.size > 1) "${v.index + 1} / ${v.paths.size}" else FileOps.fmtSize(file.length()),
+                Uri.decode(file.name),
+                when {
+                    v.paths.size > 1 -> "${v.index + 1} / ${v.paths.size}"
+                    stream -> Uri.parse(path).host ?: "Streaming"
+                    else -> FileOps.fmtSize(file.length())
+                },
                 onBack = { vm.back() },
             ) {
-                IconButton({ openWith(ctx, file) { vm.message = it } }) { Icon(Icons.AutoMirrored.Filled.OpenInNew, "Open with", tint = Color.White) }
+                IconButton({ openElsewhere() }) { Icon(Icons.AutoMirrored.Filled.OpenInNew, "Open with", tint = Color.White) }
             }
 
             Row(
@@ -515,7 +537,7 @@ fun ZipViewer(v: Viewer.Zip, vm: FmViewModel, onDlg: (Dlg) -> Unit) {
             }
             else -> {
                 Text(
-                    "${l.files} files · ${FileOps.fmtSize(l.size)} (${FileOps.fmtSize(l.compressed)} compressed)",
+                    "${l.files} files · ${FileOps.fmtSize(l.size)}" + if (l.compressed in 1 until l.size) " (${FileOps.fmtSize(l.compressed)} compressed)" else "",
                     color = Dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
                 val rows = l.children[v.dir].orEmpty()

@@ -283,6 +283,10 @@ class CodeState(val lang: Lang) {
         val v = value
         if (!v.selection.collapsed) return null
         val cur = v.selection.start
+        // Molang inside JSON strings: q. / query. / math. / v. / t. / c.
+        if (lang === Langs.JSON && Molang.inJsonString(v.text, cur)) {
+            Molang.complete(v.text, cur)?.let { return it.takeIf { c -> c.items.isNotEmpty() } }
+        }
         if (bedrockActive) {
             val c = if (lang === Langs.JSON) Bedrock.completeJson(v.text, cur) else Bedrock.completeJs(v.text, cur)
             if (c != null) return c.takeIf { it.items.isNotEmpty() }

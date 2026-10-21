@@ -50,11 +50,11 @@ object FileOps {
     val VIDEOS = setOf("mp4", "mkv", "webm", "3gp", "3g2", "avi", "mov", "m4v", "flv", "wmv", "mpg", "mpeg", "ogv")
     val AUDIO = setOf("mp3", "m4a", "wav", "flac", "ogg", "oga", "aac", "opus", "amr", "mid", "midi", "wma", "aiff", "aif", "mka", "m4b")
     val DOCS = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "rtf", "odt", "ods", "odp", "epub", "mobi")
-    val ARCHIVES = setOf("zip", "gz", "tgz", "xz", "bz2", "zst", "tar", "7z", "rar", "lz", "lzma", "cab", "mcpack", "mcaddon", "mcworld", "mctemplate", "jar")
+    val ARCHIVES = setOf("zip", "gz", "tgz", "xz", "bz2", "zst", "tar", "7z", "rar", "lz", "lzma", "cab", "mcpack", "mcaddon", "mcworld", "mctemplate", "jar", "brarchive")
     /** Zip files under another name: these can be extracted too. */
-    val ZIPLIKE = setOf("zip", "mcpack", "mcaddon", "mcworld", "mctemplate", "jar", "apk", "xapk", "apks", "epub", "docx", "xlsx", "pptx", "odt")
+    val ZIPLIKE = setOf("zip", "mcpack", "mcaddon", "mcworld", "mctemplate", "jar", "apk", "xapk", "apks", "epub", "docx", "xlsx", "pptx", "odt", "brarchive")
     /** Archives that open in the built-in archive browser when tapped. */
-    val ZIP_BROWSE = setOf("zip", "jar", "aar", "war", "mcpack", "mcaddon", "mcworld", "mctemplate")
+    val ZIP_BROWSE = setOf("zip", "jar", "aar", "war", "mcpack", "mcaddon", "mcworld", "mctemplate", "brarchive")
     val APKS = setOf("apk", "apks", "xapk", "apkm", "aab")
     val TEXT = setOf(
         "txt", "md", "markdown", "log", "csv", "tsv", "ini", "cfg", "conf", "properties", "srt", "vtt", "ass", "lrc",
@@ -219,6 +219,17 @@ object FileOps {
      * placed directly in [outDir]. Existing files are kept: new ones get a " (1)" suffix.
      */
     fun unzip(zip: File, outDir: File, only: String? = null) {
+        if (zip.extension.equals("brarchive", true)) {
+            // Flat archive: entries are plain file names; empty placeholders are skipped
+            outDir.mkdirs()
+            for (it in Brarchive.list(zip)) {
+                if (it.size == 0 || (only != null && it.name != only)) continue
+                val t = unique(outDir, it.name, false)
+                if (!t.canonicalPath.startsWith(outDir.canonicalPath + File.separator)) throw SecurityException("Unsafe archive entry")
+                t.writeBytes(Brarchive.read(zip, it))
+            }
+            return
+        }
         outDir.mkdirs()
         val base = outDir.canonicalPath + File.separator
         val strip = only?.trimEnd('/')?.substringBeforeLast('/', "")?.let { if (it.isEmpty()) "" else "$it/" } ?: ""
@@ -249,7 +260,7 @@ object FileOps {
 
     /** Archive contents as a folder tree (folders implied by paths are added). */
     fun zipListing(f: File): ZipListing = try {
-        openZip(f).use { z ->
+        if (f.extension.equals("brarchive", true)) brarchiveListing(f) else openZip(f).use { z ->
             val map = LinkedHashMap<String, ZEntry>()
             fun ensureDir(p: String) {
                 if (p.isEmpty() || p in map) return
@@ -277,6 +288,13 @@ object FileOps {
         ZipListing(emptyMap(), 0, 0, 0, e.message ?: "unknown error")
     }
 
+    private fun brarchiveListing(f: File): ZipListing {
+        val items = Brarchive.list(f)
+        val entries = items.map { ZEntry(it.name, it.name, false, it.size.toLong(), it.size.toLong(), f.lastModified()) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+        return ZipListing(mapOf("" to entries), items.size, items.sumOf { it.size.toLong() }, f.length())
+    }
+
     /** Copies one entry to the app cache so it can be opened. */
     fun extractToCache(cacheDir: File, zip: File, entry: String): File {
         val dir = File(cacheDir, "zipview/${zip.path.hashCode().toUInt()}-${zip.lastModified()}")
@@ -284,6 +302,11 @@ object FileOps {
         if (!out.canonicalPath.startsWith(dir.canonicalPath + File.separator)) throw SecurityException("Unsafe archive entry")
         if (out.isFile) return out
         out.parentFile?.mkdirs()
+        if (zip.extension.equals("brarchive", true)) {
+            val item = Brarchive.list(zip).firstOrNull { it.name == entry } ?: error("Entry not found")
+            out.writeBytes(Brarchive.read(zip, item))
+            return out
+        }
         openZip(zip).use { z ->
             val e = z.getEntry(entry) ?: error("Entry not found")
             z.getInputStream(e).use { i -> FileOutputStream(out).use { i.copyTo(it) } }

@@ -6,25 +6,26 @@
 # and press Settings > Reload icons to replace it without rebuilding.
 
 type = #5BAE3C
-W = #B8945F
-K = #6B4A2A
-U = #8F6A3A
-V = #6E5030
-T = @type
+K = #3D2611
+L = #C8913F
+W = #A0682B
+D = #7A4E20
+S = @type
+T = @type+0.4
 
 ................
-......WKKW......
-....KWKWWKWK....
-..WWKWKWWKWKWW..
-KWKKWWWKKWWWKKW.
-KKKWWKWWWWKWWKK.
-UKKKKWWKKWWKKKK.
-UUUKKKKWWKKKKVV.
-UUUUUKKKKKKVVVV.
-UUTTUUUKKVVVVVV.
-UUUUTUUUVVTTVVV.
-UUUUUUUUVTVVVVV.
-..UUUUUUVVVVVV..
-....UUUUVVVV....
-......UUVV......
+......KKKK......
+.....KSTTSK.....
+......KSSK......
+.....KLLLLK.....
+....KLWWWWLK....
+...KLWWWWWWLK...
+..KLWWWWWWWWLK..
+..KWWWWWWWWWDK..
+.KWWWWWWWWWWDDK.
+.KWWWWWWWWWDDDK.
+.KWWWWWWWWDDDDK.
+.KDWWWWWWDDDDDK.
+..KDDDDDDDDDDK..
+...KKKKKKKKKK...
 ................

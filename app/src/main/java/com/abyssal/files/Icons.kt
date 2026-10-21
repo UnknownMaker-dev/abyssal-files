@@ -233,6 +233,8 @@ object IconMap {
         add("mctemplate", "mctemplate")
         add("mcpack", "mcpack")
         add("mcaddon", "mcaddon")
+        add("mcstructure", "mcstructure")
+        add("brarchive", "brarchive")
         add("mcfunction", "mcfunction")
         add("nbt", "nbt", "schem", "schematic", "litematic")
         add("mca", "mca", "mcr")
@@ -288,7 +290,7 @@ object IconMap {
 
 /** Draws a named icon: custom PNG > custom/default pixel grid > generic fallback. */
 @Composable
-fun PixIcon(name: String, size: Dp = 32.dp, modifier: Modifier = Modifier) {
+fun PixIcon(name: String, size: Dp = 32.dp, modifier: Modifier = Modifier, contentDescription: String? = null) {
     val png = CustomIcons.map[name]
     val bmp = png ?: run {
         val accent = Pal.accent.toArgb()
@@ -304,7 +306,7 @@ fun PixIcon(name: String, size: Dp = 32.dp, modifier: Modifier = Modifier) {
         // Pixel art stays crisp; big custom PNGs are smoothed
         BitmapPainter(bmp, filterQuality = if (bmp.width <= 64) FilterQuality.None else FilterQuality.Medium)
     }
-    Image(painter, null, modifier.size(size))
+    Image(painter, contentDescription, modifier.size(size))
 }
 
 @Composable
@@ -330,9 +332,49 @@ fun rememberThumb(item: FileItem, px: Int = THUMB_PX): ImageBitmap? {
     }.value
 }
 
+// ───────── Minecraft pack icons ─────────
+
+private val packIcons = LruCache<String, ImageBitmap>(80)
+private val notPacks = java.util.Collections.synchronizedSet(HashSet<String>())
+
+/**
+ * pack_icon.png of a behavior or resource pack folder (development ones too): any folder whose manifest.json
+ * declares a resources/data/script module. Other folders with a pack_icon.png keep their normal icon.
+ */
+@Composable
+fun rememberPackIcon(path: String): ImageBitmap? = produceState(packIcons.get(path), path) {
+    if (value == null && path !in notPacks) {
+        value = withContext(Dispatchers.IO) {
+            val dir = File(path)
+            val icon = File(dir, "pack_icon.png")
+            if (!icon.isFile || Brarchive.packKind(dir) == null) { notPacks += path; return@withContext null }
+            runCatching {
+                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(icon.path, o)
+                var s = 1
+                while (o.outWidth / (s * 2) >= 128) s *= 2
+                BitmapFactory.decodeFile(icon.path, BitmapFactory.Options().apply { inSampleSize = s })?.asImageBitmap()
+            }.getOrNull()?.also { packIcons.put(path, it) }
+        }
+    }
+}.value
+
+/** A folder's icon: the pack's own icon for Minecraft packs, otherwise the pixel folder. */
+@Composable
+fun FolderIcon(path: String, name: String, size: Dp) {
+    val pack = rememberPackIcon(path)
+    if (pack == null) {
+        PixIcon(IconMap.forFolder(name), size)
+    } else {
+        val painter = remember(pack) { BitmapPainter(pack, filterQuality = if (pack.width <= 64) FilterQuality.None else FilterQuality.Medium) }
+        Image(painter, "Pack icon", Modifier.size(size).clip(RoundedCornerShape(size * 0.14f)))
+    }
+}
+
 /** Photo / video thumbnail when available, otherwise the file-type icon. */
 @Composable
 fun FileIcon(item: FileItem, size: Dp = 36.dp) {
+    if (item.isDir) { FolderIcon(item.path, item.name, size); return }
     val kind = item.kind
     val thumb = rememberThumb(item)
 

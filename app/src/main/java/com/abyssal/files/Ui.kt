@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -106,12 +107,15 @@ fun FileManagerApp(vm: FmViewModel) {
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 64.dp))
     }
 
+    if (vm.updateDialog) UpdateDialog(vm)
+
     val close = { dlg = null }
     when (val d = dlg) {
         is Dlg.Rename -> NameDialog("Rename", d.item.name, { vm.rename(d.item, it); close() }, close)
         Dlg.NewFolder -> NameDialog("New folder", "", { vm.newFolder(it); close() }, close)
         Dlg.NewFile -> NewFileDialog({ vm.newFile(it); close() }, close)
-        Dlg.ZipName -> NameDialog("Archive name", "archive", { vm.zipSelected(it); close() }, close)
+        Dlg.ZipName -> NameDialog("Archive name", vm.defaultArchiveName(), { vm.zipSelected(it); close() }, close)
+        Dlg.CompileName -> NameDialog("Compiled pack name", vm.defaultArchiveName(), { vm.compileBrarchive(vm.selected.toList(), it); close() }, close)
         Dlg.Delete -> DeleteDialog(vm.selected.size, { vm.deleteSelected(); close() }, close)
         is Dlg.Props -> PropertiesDialog(d.paths, vm::displayPath, close)
         is Dlg.ExtractTo -> FolderPickerDialog(vm, File(d.zip).parentFile, "Extract to", "Extract here", { dir ->
@@ -171,8 +175,8 @@ fun HomeScreen(vm: FmViewModel) {
         if (vm.favorites.isNotEmpty()) {
             item { SectionLabel("Favorites") }
             items(vm.favorites, key = { "fav:$it" }) { p ->
-                FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }) {
-                    IconButton({ vm.toggleFavorite(p) }) { Icon(Icons.Filled.Star, "Remove favorite", tint = Gold) }
+                FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }, path = p) {
+                    IconButton({ vm.toggleFavorite(p) }) { PixIcon("star", 24.dp, contentDescription = "Remove favorite") }
                 }
             }
         }
@@ -205,7 +209,7 @@ fun HomeScreen(vm: FmViewModel) {
                 }
             }
             items(vm.history.take(4), key = { "rec:$it" }) { p ->
-                FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) })
+                FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }, path = p)
             }
         }
 
@@ -248,14 +252,14 @@ private fun StorageCard(v: Volume, onClick: () -> Unit) {
 @Composable
 private fun FolderCard(
     title: String, subtitle: String?, onClick: () -> Unit,
-    icon: String = IconMap.forFolder(title), trailing: @Composable () -> Unit = {},
+    icon: String = IconMap.forFolder(title), path: String? = null, trailing: @Composable () -> Unit = {},
 ) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Panel)
             .clickable(onClick = onClick).padding(start = 10.dp, end = 4.dp).heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PixIcon(icon, 30.dp)
+        if (path != null) FolderIcon(path, title, 30.dp) else PixIcon(icon, 30.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
             Text(title.ifEmpty { "/" }, fontSize = 14.sp, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -286,7 +290,7 @@ fun HistoryScreen(vm: FmViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(vm.history, key = { it }) { p ->
-                    FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) })
+                    FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }, path = p)
                 }
             }
         }
@@ -315,8 +319,8 @@ fun FavoritesScreen(vm: FmViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(vm.favorites, key = { it }) { p ->
-                    FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }) {
-                        IconButton({ vm.toggleFavorite(p) }) { Icon(Icons.Filled.Star, "Remove favorite", tint = Gold) }
+                    FolderCard(vm.displayName(p), vm.displayPath(p), onClick = { vm.openDir(File(p)) }, path = p) {
+                        IconButton({ vm.toggleFavorite(p) }) { PixIcon("star", 24.dp, contentDescription = "Remove favorite") }
                     }
                 }
             }
@@ -335,13 +339,19 @@ private fun NavBar(vm: FmViewModel) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NavItem(Icons.Outlined.Home, Icons.Filled.Home, "Home", s is Screen.Home || s is Screen.Dir || s is Screen.Category) { vm.openHome() }
-        NavItem(Icons.Outlined.StarBorder, Icons.Filled.Star, "Favorites", s is Screen.Favorites) { vm.openFavorites() }
+        NavItem("Favorites", s is Screen.Favorites, { vm.openFavorites() }) { on ->
+            PixIcon(if (on) "star" else "star-outline", 22.dp, Modifier.alpha(if (on) 1f else 0.75f))
+        }
         NavItem(Icons.Outlined.History, Icons.Filled.History, "History", s is Screen.History) { vm.openHistory() }
     }
 }
 
 @Composable
-private fun RowScope.NavItem(icon: ImageVector, active: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.NavItem(icon: ImageVector, active: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) =
+    NavItem(label, selected, onClick) { on -> Icon(if (on) active else icon, label, tint = if (on) Accent else Dim, modifier = Modifier.size(22.dp)) }
+
+@Composable
+private fun RowScope.NavItem(label: String, selected: Boolean, onClick: () -> Unit, icon: @Composable (Boolean) -> Unit) {
     Column(
         Modifier.weight(1f).fillMaxHeight().clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -351,7 +361,7 @@ private fun RowScope.NavItem(icon: ImageVector, active: ImageVector, label: Stri
             Modifier.clip(CircleShape).background(if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent)
                 .padding(horizontal = 16.dp, vertical = 3.dp),
         ) {
-            Icon(if (selected) active else icon, label, tint = if (selected) Accent else Dim, modifier = Modifier.size(22.dp))
+            icon(selected)
         }
         Text(label, fontSize = 11.sp, color = if (selected) Accent else Dim)
     }
@@ -547,7 +557,7 @@ private fun BrowserTopBar(vm: FmViewModel, onDlg: (Dlg) -> Unit) {
             if (isDir) {
                 val fav = vm.isFavorite(vm.dir.path)
                 IconButton(onClick = { vm.toggleFavorite(vm.dir.path) }, Modifier.size(44.dp)) {
-                    Icon(if (fav) Icons.Filled.Star else Icons.Outlined.StarBorder, "Favorite", tint = if (fav) Gold else Ink)
+                    PixIcon(if (fav) "star" else "star-outline", 24.dp, contentDescription = if (fav) "Remove favorite" else "Favorite")
                 }
             }
         } else {
@@ -663,7 +673,7 @@ private fun FileRow(
             )
             Text(sub, fontSize = size.subSp.sp, color = Dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (favorite) Icon(Icons.Filled.Star, "Favorite", tint = Gold, modifier = Modifier.size(16.dp))
+        if (favorite) PixIcon("star", 18.dp)
     }
 }
 
@@ -783,6 +793,9 @@ private fun ActionBar(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
                     MenuItem("Rename") { onDlg(Dlg.Rename(archive)); more = false }
                 }
                 MenuItem("Compress to zip") { onDlg(Dlg.ZipName); more = false }
+                if (vm.selectedItems.any { it.isDir || it.ext in setOf("mcpack", "mcaddon", "zip") }) {
+                    MenuItem("Compile to brarchive") { onDlg(Dlg.CompileName); more = false }
+                }
                 MenuItem("Share") { share(ctx, vm.selectedItems) { vm.message = it }; more = false }
                 if (one != null && !one.isDir) {
                     MenuItem("Open with…") { openWith(ctx, File(one.path)) { vm.message = it }; more = false }
@@ -920,6 +933,10 @@ private fun ExternalScreen(vm: FmViewModel) {
                     PixIcon(IconMap.forFile(song.name, song.extension.lowercase()), 96.dp)
                     Spacer(Modifier.height(16.dp))
                     Text(song.nameWithoutExtension, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (vm.player.loading) {
+                        Spacer(Modifier.height(12.dp))
+                        CircularProgressIndicator(color = Accent)
+                    }
                 }
                 else -> {
                     Logo(72.dp)
@@ -932,6 +949,69 @@ private fun ExternalScreen(vm: FmViewModel) {
         }
         PlayerBar(vm.player)
     }
+}
+
+/** New version found on GitHub: notes, download progress, then Android's installer. */
+@Composable
+private fun UpdateDialog(vm: FmViewModel) {
+    val ctx = LocalContext.current
+    val st = vm.update
+    val rel = when (st) {
+        is UpdateState.Available -> st.release
+        is UpdateState.Downloading -> st.release
+        is UpdateState.Ready -> st.release
+        else -> null
+    }
+    LaunchedEffect(st) {
+        when (st) {
+            is UpdateState.Ready -> Updater.install(ctx, st.apk)?.let { vm.message = it }
+            is UpdateState.Available, is UpdateState.Downloading, is UpdateState.Failed -> {}
+            else -> vm.updateDialog = false
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { if (st !is UpdateState.Downloading) vm.updateDialog = false },
+        icon = { Logo(40.dp) },
+        title = { Text(if (rel != null) "Update available" else "Update") },
+        text = {
+            Column {
+                if (rel != null) {
+                    Text(
+                        "${vm.appVersion} → ${rel.version}" + if (rel.prerelease) "  (beta)" else "",
+                        color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(FileOps.fmtSize(rel.size), color = Dim, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                        Text(Updater.plainNotes(rel.notes), color = Dim, fontSize = 13.sp)
+                    }
+                }
+                when (st) {
+                    is UpdateState.Downloading -> {
+                        Spacer(Modifier.height(12.dp))
+                        LinearProgressIndicator(
+                            progress = { st.progress }, modifier = Modifier.fillMaxWidth(), color = Accent, trackColor = Panel2,
+                            drawStopIndicator = {},
+                        )
+                        Text("Downloading… ${(st.progress * 100).toInt()}%", color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    }
+                    is UpdateState.Failed -> Text(st.message, color = Danger, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            when (st) {
+                is UpdateState.Available -> TextButton({ vm.downloadUpdate() }) { Text("Update") }
+                is UpdateState.Failed -> TextButton({ vm.downloadUpdate() }) { Text("Try again") }
+                is UpdateState.Ready -> TextButton({ Updater.install(ctx, st.apk)?.let { vm.message = it } }) { Text("Install") }
+                else -> {}
+            }
+        },
+        dismissButton = {
+            if (st !is UpdateState.Downloading) TextButton({ vm.updateDialog = false }) { Text("Later") }
+        },
+    )
 }
 
 // ───────────────────────── intents ─────────────────────────

@@ -30,6 +30,24 @@ class Prefs(ctx: Context) {
         get() = runCatching { ViewSize.valueOf(sp.getString("viewSize", null)!!) }.getOrDefault(ViewSize.MEDIUM)
         set(v) = sp.edit().putString("viewSize", v.name).apply()
 
+    /** Accent that cycles through every hue ("RGB" preset). */
+    var rgbAccent: Boolean
+        get() = sp.getBoolean("rgbAccent", false)
+        set(v) = sp.edit().putBoolean("rgbAccent", v).apply()
+
+    /** null = not chosen yet (follows the installed version: betas get betas). */
+    var updateBeta: Boolean?
+        get() = if (sp.contains("updateBeta")) sp.getBoolean("updateBeta", false) else null
+        set(v) = sp.edit().apply { if (v == null) remove("updateBeta") else putBoolean("updateBeta", v) }.apply()
+
+    var autoUpdate: Boolean
+        get() = sp.getBoolean("autoUpdate", true)
+        set(v) = sp.edit().putBoolean("autoUpdate", v).apply()
+
+    var lastUpdateCheck: Long
+        get() = sp.getLong("lastUpdateCheck", 0L)
+        set(v) = sp.edit().putLong("lastUpdateCheck", v).apply()
+
     var colorfulIcons: Boolean
         get() = sp.getBoolean("colorfulIcons", false)
         set(v) = sp.edit().putBoolean("colorfulIcons", v).apply()

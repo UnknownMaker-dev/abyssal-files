@@ -17,6 +17,9 @@ const val DEFAULT_ACCENT = 0xFFA324EC.toInt()
 object Pal {
     var accent by mutableStateOf(Color(DEFAULT_ACCENT))
 
+    /** "RGB" preset: the accent keeps cycling through the hues (driven from MainActivity). */
+    var rgb by mutableStateOf(false)
+
     /** false: every icon uses the accent; true: each file type keeps its own colour (VS Code style). */
     var colorfulIcons by mutableStateOf(false)
 }

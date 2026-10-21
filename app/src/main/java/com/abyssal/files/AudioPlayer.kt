@@ -23,6 +23,9 @@ class AudioPlayer(private val scope: CoroutineScope) {
     var error by mutableStateOf<String?>(null)
 
     private var mp: MediaPlayer? = null
+    private var prepared = false
+    /** Streams (http links from other apps) take a moment to start. */
+    var loading by mutableStateOf(false); private set
     private var ticker: Job? = null
 
     val current: File? get() = queue.getOrNull(index)?.let(::File)
@@ -48,35 +51,47 @@ class AudioPlayer(private val scope: CoroutineScope) {
             p.setOnCompletionListener {
                 if (index < queue.lastIndex) load(index + 1) else { pause(); seek(0) }
             }
-            p.prepare()
-            p.start()
-            mp = p
-            duration = p.duration
-            playing = true
-            ticker = scope.launch {
-                while (isActive) {
-                    mp?.let { position = it.currentPosition }
-                    delay(250)
+            p.setOnPreparedListener {
+                if (mp !== it) return@setOnPreparedListener
+                prepared = true; loading = false
+                it.start()
+                duration = it.duration
+                playing = true
+                ticker = scope.launch {
+                    while (isActive) {
+                        mp?.takeIf { prepared }?.let { m -> position = m.currentPosition }
+                        delay(250)
+                    }
                 }
             }
+            p.setOnErrorListener { mp, _, _ ->
+                if (this.mp === mp) { release(); error = "Can't play ${File(queue[i]).name}" }
+                true
+            }
+            mp = p
+            loading = true
+            p.prepareAsync()
         } catch (e: Exception) {
             p.release()
+            if (mp === p) mp = null
+            loading = false
             error = "Can't play ${File(queue[i]).name}"
         }
     }
 
     fun toggle() {
         val p = mp ?: run { if (index in queue.indices) load(index); return }
+        if (!prepared) return
         if (p.isPlaying) pause() else { p.start(); playing = true }
     }
 
     fun pause() {
-        mp?.takeIf { it.isPlaying }?.pause()
+        mp?.takeIf { prepared && it.isPlaying }?.pause()
         playing = false
     }
 
     fun seek(ms: Int) {
-        mp?.seekTo(ms)
+        mp?.takeIf { prepared }?.seekTo(ms)
         position = ms
     }
 
@@ -94,6 +109,8 @@ class AudioPlayer(private val scope: CoroutineScope) {
         ticker?.cancel()
         mp?.release()
         mp = null
+        prepared = false
+        loading = false
         playing = false
         position = 0
         duration = 0

@@ -28,6 +28,7 @@ sealed interface Dlg {
     data object NewFolder : Dlg
     data object NewFile : Dlg
     data object ZipName : Dlg
+    data object CompileName : Dlg
     data object Delete : Dlg
     data class Props(val paths: List<String>) : Dlg
     data class ExtractTo(val zip: String, val entry: String? = null) : Dlg

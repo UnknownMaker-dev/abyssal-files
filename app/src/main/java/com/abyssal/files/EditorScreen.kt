@@ -95,6 +95,7 @@ fun EditorScreen(
     var bedrock by remember { mutableStateOf(prefs.bedrockMode) }
     SideEffect { code.bedrock = bedrock }
     var menu by remember { mutableStateOf(false) }
+    var molang by remember { mutableStateOf(false) }
     var finding by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var replacement by remember { mutableStateOf("") }
@@ -190,6 +191,16 @@ fun EditorScreen(
                         leadingIcon = { PixIcon("mcworld", 22.dp) },
                         trailingIcon = { Switch(bedrock, null, Modifier.scale(0.75f)) },
                         onClick = { bedrock = !bedrock; prefs.bedrockMode = bedrock },
+                    )
+                    if (lang === Langs.JSON || bedrock) DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Molang query builder", fontSize = 14.sp)
+                                Text("Build a query without code", fontSize = 11.sp, color = Dim)
+                            }
+                        },
+                        leadingIcon = { PixIcon("code", 22.dp) },
+                        onClick = { menu = false; molang = true },
                     )
                     DropdownMenuItem(
                         text = { Text((if (wrap) "✓  " else "     ") + "Word wrap", fontSize = 14.sp) },
@@ -302,6 +313,15 @@ fun EditorScreen(
             )
             if (editing) ExtraKeys(code)
         }
+    }
+
+    if (molang) {
+        val d = doc
+        val canInsert = editing && d is Doc.Ready && !d.readOnly && !req.readOnly
+        MolangBuilderDialog(onDismiss = { molang = false }, onInsert = if (canInsert) { expr ->
+            val sel = code.value.selection
+            code.replace(sel.min, sel.max, expr)
+        } else null)
     }
 
     if (confirmExit) {

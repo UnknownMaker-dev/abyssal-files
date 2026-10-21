@@ -130,7 +130,9 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun openIncoming(uri: Uri, mime: String?, edit: Boolean, writable: Boolean, direct: Boolean) {
         if (started) return
-        started = true; external = true; opening = true
+        started = true; external = true
+        if (uri.scheme == "http" || uri.scheme == "https") { openLink(uri, mime); return }
+        opening = true
         val ctx = getApplication<Application>()
         viewModelScope.launch {
             val r = withContext(Dispatchers.IO) {
@@ -142,6 +144,53 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
             r.onSuccess { (f, source) -> showIncoming(f, source, edit, writable) }
                 .onFailure { openError = if (it is java.io.FileNotFoundException) "File not found" else "Can't open this file" }
             opening = false
+        }
+    }
+
+    /** Video/audio links stream straight into the players. */
+    private fun openLink(uri: Uri, mime: String?) {
+        val url = uri.toString()
+        val ext = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase()
+        when {
+            mime?.startsWith("video/") == true || ext in FileOps.VIDEOS || ext == "m3u8" -> openViewer(Viewer.Videos(listOf(url), 0))
+            mime?.startsWith("audio/") == true || ext in FileOps.AUDIO -> player.play(listOf(url), 0)
+            else -> openError = "Only video and audio links can be opened"
+        }
+    }
+
+    // ---- brarchive ----
+    /** Compiles pack folders (or .mcpack/.mcaddon/.zip files) into an optimized .mcpack/.mcaddon next to them. */
+    fun compileBrarchive(paths: List<String>, name: String) {
+        val inputs = paths.map(::File)
+        val outDir = inputs.firstOrNull()?.parentFile ?: return
+        val cache = getApplication<Application>().cacheDir
+        selected = emptySet()
+        busy = true
+        message = "Compiling to brarchive…"
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = File(cache, "brarchive-src").apply { deleteRecursively(); mkdirs() }
+                    val dirs = inputs.map { f ->
+                        if (f.isFile) File(src, f.nameWithoutExtension).also { FileOps.unzip(f, it) } else f
+                    }
+                    try {
+                        Brarchive.compileToPackage(dirs, outDir, name.trim().ifEmpty { "pack" }, File(cache, "brarchive-work"))
+                    } finally {
+                        src.deleteRecursively()
+                    }
+                }
+            }
+            busy = false
+            message = r.fold(
+                { (f, st) ->
+                    "Created ${f.name}: ${st.packed} files in ${st.archives} archives" +
+                        (st.notes.firstOrNull { "invalid JSON" in it }?.let { " · some JSON is invalid and was left as is" } ?: "") +
+                        (if (st.notes.any { "behavior pack" in it }) " · behavior packs copied as is" else "")
+                },
+                { "Compile failed: ${it.message}" },
+            )
+            refresh()
         }
     }
 
@@ -369,8 +418,68 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     fun closeEditor() { editing = null }
 
     fun setAccent(c: Color, persist: Boolean = true) {
+        if (Pal.rgb) { Pal.rgb = false; prefs.rgbAccent = false }
         Pal.accent = c
         if (persist) prefs.accent = c.toArgb()
+    }
+
+    fun setRgbAccent() {
+        Pal.rgb = true
+        prefs.rgbAccent = true
+    }
+
+    // ---- updates ----
+    val appVersion: AppVersion = runCatching {
+        AppVersion.parse(app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "")
+    }.getOrNull() ?: AppVersion(listOf(0), null)
+    var updateBeta by mutableStateOf(prefs.updateBeta ?: appVersion.isBeta); private set
+    var autoUpdate by mutableStateOf(prefs.autoUpdate); private set
+    var update by mutableStateOf<UpdateState>(UpdateState.Idle); private set
+    var updateDialog by mutableStateOf(false)
+
+    fun changeUpdateChannel(beta: Boolean) {
+        updateBeta = beta; prefs.updateBeta = beta
+        if (update !is UpdateState.Downloading) update = UpdateState.Idle
+    }
+
+    fun changeAutoUpdate(on: Boolean) { autoUpdate = on; prefs.autoUpdate = on }
+
+    /** On launch, at most every 6 hours. */
+    fun autoCheckUpdates() {
+        if (autoUpdate && System.currentTimeMillis() - prefs.lastUpdateCheck > 6 * 3600_000L) checkUpdates(manual = false)
+    }
+
+    fun checkUpdates(manual: Boolean) {
+        if (update is UpdateState.Checking || update is UpdateState.Downloading) return
+        update = UpdateState.Checking
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { Updater.pick(Updater.fetch(), appVersion, updateBeta) } }
+            prefs.lastUpdateCheck = System.currentTimeMillis()
+            update = r.fold(
+                { found -> found?.let { UpdateState.Available(it) } ?: UpdateState.UpToDate },
+                { if (manual) UpdateState.Failed("Couldn't check for updates: ${it.message}") else UpdateState.Idle },
+            )
+            (update as? UpdateState.Available)?.let { lastRelease = it.release; updateDialog = true }
+        }
+    }
+
+    private var lastRelease: Release? = null
+
+    fun downloadUpdate() {
+        val rel = (update as? UpdateState.Available)?.release ?: lastRelease ?: return
+        lastRelease = rel
+        update = UpdateState.Downloading(rel, 0f)
+        viewModelScope.launch {
+            var last = 0f
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    Updater.download(rel, File(getApplication<Application>().cacheDir, "updates")) { p ->
+                        if (p - last >= 0.01f || p >= 1f) { last = p; update = UpdateState.Downloading(rel, p) }
+                    }
+                }
+            }
+            update = r.fold({ UpdateState.Ready(rel, it) }, { UpdateState.Failed("Download failed: ${it.message}") })
+        }
     }
 
     fun setColorfulIcons(on: Boolean) {
@@ -466,6 +575,13 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
             validName(name)
             created = FileOps.createFile(parent, name.trim())
         }
+    }
+
+    /** The first selected folder's name (or the first file's, without extension). */
+    fun defaultArchiveName(): String {
+        val items = selected.map(::File)
+        val first = items.firstOrNull { it.isDirectory } ?: items.firstOrNull() ?: return "archive"
+        return if (first.isDirectory) first.name else first.nameWithoutExtension
     }
 
     fun zipSelected(name: String) {

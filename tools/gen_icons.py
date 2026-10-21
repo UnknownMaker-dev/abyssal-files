@@ -183,22 +183,87 @@ def grass_side(dark):
 iso_block("mcworld", "#5BAE3C",
           {"G": "@type", "H": "@type+0.25", "D": "@type*0.72", "B": "#8B5A2B", "C": "#6B4220", "E": "#55361A"},
           grass_top, grass_side(False), grass_side(True), seed=7)
-ICONS["mctemplate"] = ICONS["mcworld"]
+
+# World template: a Minecraft map (paper, land in the type colour, water, a red marker)
+ICONS["mctemplate"] = ("#5BAE3C", {"K": "#6B5638", "P": "#E8DFC7", "G": "@type", "B": "#4F8FD8", "R": "#E5534B"}, [
+    "................",
+    ".KKKKKKKKKKKKKK.",
+    ".KPPPPPPPPPPPPK.",
+    ".KPGGGPPPBBBPPK.",
+    ".KPGGGGPBBBBGPK.",
+    ".KPPGGGGBBGGGPK.",
+    ".KPBBGGGGGGGPPK.",
+    ".KPBBBGGRGGPPPK.",
+    ".KPPBBGRRRGBBPK.",
+    ".KPPPGGGRGGBBPK.",
+    ".KPGGGGPPPBBBPK.",
+    ".KPGGPPPPPPBBPK.",
+    ".KPPPPPPPPPPPPK.",
+    ".KKKKKKKKKKKKKK.",
+    "................",
+    "................",
+])
 
 
-def table_top(x, y, r):
-    return "K" if (x + 2 * y) % 5 == 0 or (x - 2 * y) % 5 == 0 else "W"
-def table_side(dark):
+# Add-on: a bundle, several packs tied together (the tie follows the type colour)
+ICONS["mcaddon"] = ("#5BAE3C", {"K": "#3D2611", "L": "#C8913F", "W": "#A0682B", "D": "#7A4E20", "S": "@type", "T": "@type+0.4"}, [
+    "................",
+    "......KKKK......",
+    ".....KSTTSK.....",
+    "......KSSK......",
+    ".....KLLLLK.....",
+    "....KLWWWWLK....",
+    "...KLWWWWWWLK...",
+    "..KLWWWWWWWWLK..",
+    "..KWWWWWWWWWDK..",
+    ".KWWWWWWWWWWDDK.",
+    ".KWWWWWWWWWDDDK.",
+    ".KWWWWWWWWDDDDK.",
+    ".KDWWWWWWDDDDDK.",
+    "..KDDDDDDDDDDK..",
+    "...KKKKKKKKKK...",
+    "................",
+])
+
+
+# Structure block: fixed colours, never tinted. Light frame around each face, dark speckled inside, a bright core.
+def structure_top(x, y, r):
+    d = abs(x + 0.5 - 8) / 7.5 + abs(y + 0.5 - 4.25) / 3.75
+    if d > 0.74: return "W"
+    if d < 0.22: return "C"
+    return r.choice("DDEEB")
+def structure_side(dark):
     def f(x, d, r):
-        if d < 1.5: return "K"
-        if 3 <= d < 4 and x % 7 in (2, 3, 4): return "T"
+        edge = d < 1.2 or d > 6.4 or x in (0, 7, 8, 15)
+        if edge: return "B" if dark else "W"
+        if 2.8 <= d < 4.6 and x % 8 in (3, 4): return "A" if dark else "C"
+        return r.choice("EEFF") if dark else r.choice("DDEE")
+    return f
+
+
+iso_block("mcstructure", "#7E6A92",
+          {"W": "#B9A6CC", "A": "#8B78A0", "B": "#7A6890", "C": "#D7C8E6", "D": "#4E405F", "E": "#40344F", "F": "#332A40"},
+          structure_top, structure_side(False), structure_side(True), seed=11)
+
+
+# .brarchive: a barrel (Minecraft storage), lid on top and iron bands on the sides
+def barrel_top(x, y, r):
+    d = abs(x + 0.5 - 8) / 7.5 + abs(y + 0.5 - 4.25) / 3.75
+    if d > 0.78: return "R"
+    if d < 0.3: return "H"
+    return "T" if (x + y) % 4 else "R"
+def barrel_side(dark):
+    def f(x, d, r):
+        if 1.8 <= d < 2.8 or 5.8 <= d < 6.8: return "J" if dark else "I"
+        if x % 4 == 0: return "Q"
         return "V" if dark else "U"
     return f
 
 
-iso_block("mcaddon", "#5BAE3C",
-          {"W": "#B8945F", "K": "#6B4A2A", "U": "#8F6A3A", "V": "#6E5030", "T": "@type"},
-          table_top, table_side(False), table_side(True), seed=3)
+iso_block("brarchive", "#B8945F",
+          {"T": "#B8945F", "R": "#8F6A3A", "H": "#3D2611", "U": "#9C7442", "V": "#7A5A33", "Q": "#5C4224",
+           "I": "#8B929B", "J": "#5E636B"},
+          barrel_top, barrel_side(False), barrel_side(True), seed=5)
 
 ICONS["mcpack"] = ("#5BAE3C", {"K": "#3D2611", "L": "#C8913F", "W": "#A0682B", "D": "#7A4E20", "Y": "@type+0.35"}, [
     "................",
@@ -280,11 +345,27 @@ ICONS["sdcard"] = ("@accent", {"O": "@type", "Y": "#FFD34D", "W": "@type+0.85"},
     "..OOOOOOOOOOO...", "..OOOOOOOOOOO...", "..OOWWWWWWWOO...", "..OOWWWWWWWOO...", "..OOWWWWWWWOO...",
     "..OOOOOOOOOOO...", "..OOOOOOOOOOO...", "..OOOOOOOOOOO...", "..OOOOOOOOOOO...", "................",
     "................"])
-ICONS["star"] = ("#FFC83D", {"Y": "@type"}, [
-    "................", ".......Y........", "......YYY.......", "......YYY.......", ".....YYYYY......",
-    ".YYYYYYYYYYYYY..", "..YYYYYYYYYYY...", "...YYYYYYYYY....", "....YYYYYYY.....", "....YYYYYYY.....",
-    "...YYYYYYYYY....", "...YYYY.YYYY....", "..YYY.....YYY...", "..YY.......YY...", "................",
-    "................"])
+# Favourites: a gold pixel star (fixed colours) and its empty outline
+STAR = [
+    "................",
+    ".......KK.......",
+    "......KHYK......",
+    "......KHYK......",
+    ".....KHYYYK.....",
+    ".KKKKKHYYYYKKKK.",
+    ".KHHHHHYYYYYYDK.",
+    "..KHYYYYYYYYDK..",
+    "...KYYYYYYYDK...",
+    "....KYYYYYYDK...",
+    "....KYYYYYYDK...",
+    "...KYYYKKYYDDK..",
+    "...KYYK..KYDDK..",
+    "..KYKK....KKDK..",
+    "..KK........KK..",
+    "................",
+]
+ICONS["star"] = ("#FFC83D", {"K": "#8A5A00", "Y": "#FFC83D", "H": "#FFE89A", "D": "#E09A1A"}, STAR)
+ICONS["star-outline"] = ("#C9CDD6", {"K": "#C9CDD6"}, ["".join("K" if c == "K" else "." for c in r) for r in STAR])
 ICONS["history"] = ("@accent", {"O": "@type", "W": "@type*0.25", "H": "#E6E8EB"}, [
     "................", ".....OOOOOO.....", "...OOWWWWWWOO...", "..OWWWWHWWWWWO..", "..OWWWWHWWWWWO..",
     ".OWWWWWHWWWWWWO.", ".OWWWWWHWWWWWWO.", ".OWWWWWHHHHWWWO.", ".OWWWWWWWWWWWWO.", ".OWWWWWWWWWWWWO.",

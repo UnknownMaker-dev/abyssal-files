@@ -41,8 +41,12 @@ import androidx.compose.ui.unit.sp
 
 private val PRESETS = listOf(
     0xFFA324EC, 0xFF4DA3FF, 0xFF2DD4BF, 0xFF4CAF7A, 0xFFA3E635,
-    0xFFFFC83D, 0xFFFF8A3D, 0xFFFF5C7A, 0xFFF472B6, 0xFFC9CDD6, 0xFF4E4E4E,
+    0xFFFFC83D, 0xFFFF8A3D, 0xFFFF5C7A, 0xFFF472B6, 0xFFC9CDD6, 0xFF4E4E4E, 0xFFBE0000,
 ).map { Color(it) }
+
+private val RAINBOW = listOf(
+    Color(0xFFFF3B3B), Color(0xFFFFD43B), Color(0xFF3BFF6B), Color(0xFF3BD8FF), Color(0xFF6B3BFF), Color(0xFFFF3BD8), Color(0xFFFF3B3B),
+)
 
 @Composable
 fun SettingsScreen(vm: FmViewModel) {
@@ -61,13 +65,20 @@ fun SettingsScreen(vm: FmViewModel) {
                 Spacer(Modifier.height(14.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     PRESETS.forEach { c ->
-                        val on = c.toArgb() == Pal.accent.toArgb()
+                        val on = !Pal.rgb && c.toArgb() == Pal.accent.toArgb()
                         Box(
                             Modifier.size(32.dp).clip(CircleShape).background(c)
                                 .border(if (on) 3.dp else 0.dp, if (on) Ink else Color.Transparent, CircleShape)
                                 .clickable { vm.setAccent(c) }
                         )
                     }
+                    // RGB: keeps cycling through every colour
+                    Box(
+                        Modifier.size(32.dp).clip(CircleShape).background(Brush.sweepGradient(RAINBOW))
+                            .border(if (Pal.rgb) 3.dp else 0.dp, if (Pal.rgb) Ink else Color.Transparent, CircleShape)
+                            .clickable { vm.setRgbAccent() },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("RGB", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold) }
                 }
                 Spacer(Modifier.height(6.dp))
                 TextButton({ vm.setAccent(Color(DEFAULT_ACCENT)) }, contentPadding = PaddingValues(0.dp)) {
@@ -110,6 +121,15 @@ fun SettingsScreen(vm: FmViewModel) {
                     }
                     Switch(bedrock, { bedrock = it; prefs.bedrockMode = it })
                 }
+                Spacer(Modifier.height(10.dp))
+                var molang by remember { mutableStateOf(false) }
+                OutlinedButton({ molang = true }, Modifier.fillMaxWidth()) { Text("Molang query builder") }
+                Text(
+                    "Build Molang conditions without code and copy them. Typing q., v., math. or c. inside a JSON string " +
+                        "in the editor also lists every query and function.",
+                    color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp),
+                )
+                if (molang) MolangBuilderDialog(onDismiss = { molang = false }, onInsert = null)
             }
 
             Label("Icons")
@@ -166,6 +186,47 @@ fun SettingsScreen(vm: FmViewModel) {
                 }
             }
 
+            Label("Updates")
+            Card {
+                Text("Abyssal Files ${vm.appVersion}", color = Ink, fontSize = 14.sp)
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    listOf(false to "Releases only", true to "Betas too").forEachIndexed { i, (beta, label) ->
+                        SegmentedButton(
+                            selected = vm.updateBeta == beta,
+                            onClick = { vm.changeUpdateChannel(beta) },
+                            shape = SegmentedButtonDefaults.itemShape(i, 2),
+                        ) { Text(label, fontSize = 13.sp) }
+                    }
+                }
+                Text(
+                    if (vm.updateBeta) "Betas arrive first, with the newest features; they may have rough edges."
+                    else "Only stable releases.",
+                    color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Check automatically", color = Ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(vm.autoUpdate, { vm.changeAutoUpdate(it) })
+                }
+                val st = vm.update
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        { vm.checkUpdates(manual = true) },
+                        enabled = st !is UpdateState.Checking && st !is UpdateState.Downloading,
+                    ) { Text("Check for updates") }
+                    Spacer(Modifier.width(10.dp))
+                    when (st) {
+                        UpdateState.Checking -> Text("Checking…", color = Dim, fontSize = 12.sp)
+                        UpdateState.UpToDate -> Text("You're up to date", color = Dim, fontSize = 12.sp)
+                        is UpdateState.Available -> TextButton({ vm.updateDialog = true }) { Text("Get ${st.release.version}") }
+                        is UpdateState.Downloading -> Text("Downloading ${(st.progress * 100).toInt()}%", color = Dim, fontSize = 12.sp)
+                        is UpdateState.Ready -> TextButton({ vm.updateDialog = true }) { Text("Install ${st.release.version}") }
+                        is UpdateState.Failed -> Text(st.message, color = Danger, fontSize = 12.sp, maxLines = 2)
+                        UpdateState.Idle -> {}
+                    }
+                }
+            }
+
             Label("About")
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -175,6 +236,25 @@ fun SettingsScreen(vm: FmViewModel) {
                         Text("Abyssal Files", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Text("Version ${BuildConfig.VERSION_NAME}", color = Dim, fontSize = 12.sp)
                     }
+                }
+                var notices by remember { mutableStateOf<String?>(null) }
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                TextButton(
+                    { notices = runCatching { ctx.assets.open("notices.md").bufferedReader().readText() }.getOrDefault("") },
+                    contentPadding = PaddingValues(0.dp),
+                ) { Text("Open-source notices", fontSize = 13.sp) }
+                notices?.let { text ->
+                    AlertDialog(
+                        onDismissRequest = { notices = null },
+                        title = { Text("Open-source notices") },
+                        text = {
+                            Text(
+                                text.replace("```", "").replace(Regex("(?m)^#+ "), "").replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1").replace("`", ""),
+                                color = Dim, fontSize = 12.sp, modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                            )
+                        },
+                        confirmButton = { TextButton({ notices = null }) { Text("Close") } },
+                    )
                 }
             }
             Column(

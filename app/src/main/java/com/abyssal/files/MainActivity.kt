@@ -18,6 +18,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.toArgb
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,12 +42,24 @@ class MainActivity : ComponentActivity() {
         )
         val prefs = Prefs(this)
         Pal.accent = ComposeColor(prefs.accent)
+        Pal.rgb = prefs.rgbAccent
         Pal.colorfulIcons = prefs.colorfulIcons
         PixelIcons.loadDefaults(assets)
         granted = hasAccess()
         handleIntent()
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) vm.autoCheckUpdates()
         setContent {
             FmTheme {
+                if (Pal.rgb) LaunchedEffect(Unit) {
+                    // "RGB" accent: walk around the colour wheel
+                    val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(Pal.accent.toArgb(), it) }
+                    var hue = hsv[0]
+                    while (true) {
+                        hue = (hue + 3f) % 360f
+                        Pal.accent = ComposeColor.hsv(hue, 0.78f, 0.95f)
+                        delay(110)
+                    }
+                }
                 val picked = vm.pickResult
                 LaunchedEffect(picked) { picked?.let(::returnPicked) }
                 LaunchedEffect(vm.externalDone) { if (vm.externalDone) finish() }
