@@ -14,6 +14,7 @@ import android.util.Size
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -359,7 +360,7 @@ fun rememberPackIcon(path: String): ImageBitmap? = produceState(packIcons.get(pa
     }
 }.value
 
-/** A folder's icon: the pack's own icon for Minecraft packs, otherwise the pixel folder. */
+/** A folder's icon; Minecraft packs show their pack_icon.png on the folder. */
 @Composable
 fun FolderIcon(path: String, name: String, size: Dp) {
     val pack = rememberPackIcon(path)
@@ -367,7 +368,14 @@ fun FolderIcon(path: String, name: String, size: Dp) {
         PixIcon(IconMap.forFolder(name), size)
     } else {
         val painter = remember(pack) { BitmapPainter(pack, filterQuality = if (pack.width <= 64) FilterQuality.None else FilterQuality.Medium) }
-        Image(painter, "Pack icon", Modifier.size(size).clip(RoundedCornerShape(size * 0.14f)))
+        Box(Modifier.size(size)) {
+            PixIcon("folder", size)
+            // Over the folder's front, like a picture in it (3..13 × 4..14 of the 16-pixel grid)
+            Image(
+                painter, "Pack icon",
+                Modifier.offset(x = size * 3 / 16, y = size * 4 / 16).size(size * 10 / 16),
+            )
+        }
     }
 }
 

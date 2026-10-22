@@ -25,6 +25,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,7 +48,8 @@ private sealed interface Doc {
     data class Ready(val text: String, val readOnly: Boolean, val truncated: Boolean) : Doc
 }
 
-private fun load(f: File, force: Boolean): Doc = try {
+/** [onCard]: on an SD card, which may only be writable through the Storage Access Framework. */
+private fun load(f: File, force: Boolean, onCard: Boolean): Doc = try {
     when {
         !f.canRead() -> Doc.Failed("Can't read this file")
         !force && FileOps.looksBinary(f) -> Doc.Binary
@@ -62,7 +65,7 @@ private fun load(f: File, force: Boolean): Doc = try {
                 }
                 String(b, 0, off)
             }
-            Doc.Ready(text, readOnly = len > MAX_EDIT || !f.canWrite(), truncated = len > MAX_VIEW)
+            Doc.Ready(text, readOnly = len > MAX_EDIT || (!f.canWrite() && !onCard), truncated = len > MAX_VIEW)
         }
     }
 } catch (e: Exception) {
@@ -77,8 +80,11 @@ fun EditorScreen(
     onSaved: () -> Unit,
     onOpenWith: (File) -> Unit,
     onMsg: (String) -> Unit,
+    onNeedSd: (File, () -> Unit) -> Unit = { _, _ -> },
 ) {
     val ctx = LocalContext.current
+    val sd = remember { SdCard(ctx) }
+    val clipboard = LocalClipboardManager.current
     val prefs = remember { Prefs(ctx) }
     val file = remember(req.path) { File(req.path) }
     val lang = remember(req.path) { Langs.forFile(file.name) }
@@ -96,16 +102,19 @@ fun EditorScreen(
     SideEffect { code.bedrock = bedrock }
     var menu by remember { mutableStateOf(false) }
     var molang by remember { mutableStateOf(false) }
+    // Long files edit line by line (see VirtualCodeEditor); decided once when the file is loaded
+    var virtual by remember { mutableStateOf(false) }
     var finding by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var replacement by remember { mutableStateOf("") }
     var current by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(req.path, force) {
-        val d = withContext(Dispatchers.IO) { load(file, force) }
+        val d = withContext(Dispatchers.IO) { load(file, force, onCard = sd.rootOf(file) != null) }
         if (d is Doc.Ready) {
             original = d.text
             code.reset(d.text)
+            virtual = lineStarts(d.text).size > VIRTUAL_LINES && longestLine(d.text) <= VIRTUAL_MAX_LINE
             editing = req.edit && !d.readOnly && !req.readOnly
         }
         doc = d
@@ -117,9 +126,13 @@ fun EditorScreen(
     if (current >= matches.size) current = 0
 
     fun save(close: Boolean) {
+        // SD cards may need the user to allow access first; saving resumes afterwards
+        if (!sd.canWrite(file)) { onNeedSd(file) { save(close) }; return }
         val t = code.value.text
         scope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { file.writeText(t) } }
+            val r = withContext(Dispatchers.IO) {
+                runCatching { if (sd.needsSaf(file)) sd.write(file).use { it.write(t.toByteArray()) } else file.writeText(t) }
+            }
             r.onSuccess {
                 original = t
                 modified = file.lastModified()
@@ -203,7 +216,20 @@ fun EditorScreen(
                         onClick = { menu = false; molang = true },
                     )
                     DropdownMenuItem(
-                        text = { Text((if (wrap) "✓  " else "     ") + "Word wrap", fontSize = 14.sp) },
+                        text = { Text("     Copy all", fontSize = 14.sp) },
+                        onClick = {
+                            menu = false
+                            clipboard.setText(AnnotatedString(code.value.text))
+                            onMsg("Copied ${code.value.text.count { it == '\n' } + 1} lines")
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                (if (wrap) "✓  " else "     ") + "Word wrap" + if (virtual && editing) " (not in long files)" else "",
+                                fontSize = 14.sp,
+                            )
+                        },
                         onClick = { wrap = !wrap; prefs.editorWrap = wrap; menu = false },
                     )
                     DropdownMenuItem(
@@ -283,7 +309,12 @@ fun EditorScreen(
                             modifier = Modifier.fillMaxWidth().background(Panel).padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
-                    if (editing) {
+                    if (editing && virtual) {
+                        VirtualCodeEditor(
+                            code, fontSize, matches, query.length, if (finding) current else -1,
+                            Modifier.weight(1f).fillMaxWidth(),
+                        )
+                    } else if (editing) {
                         CodeEditor(
                             code, fontSize, wrap, matches, query.length, if (finding) current else -1,
                             Modifier.weight(1f).fillMaxWidth(),
@@ -300,10 +331,12 @@ fun EditorScreen(
         if (d is Doc.Ready) {
             val sel = code.value.selection.start
             val status = if (editing) {
-                val before = text.substring(0, sel.coerceAtMost(text.length))
-                val ln = before.count { it == '\n' } + 1
-                val col = sel - before.lastIndexOf('\n')
-                "${lang.name} · Ln $ln, Col $col · ${lang.indent} spaces" + if (code.bedrockActive) " · Bedrock" else ""
+                val p = sel.coerceAtMost(text.length)
+                var ln = 1
+                for (i in 0 until p) if (text[i] == '\n') ln++
+                val col = p - text.lastIndexOf('\n', p - 1)
+                "${lang.name} · Ln $ln, Col $col · ${lang.indent} spaces" + (if (code.bedrockActive) " · Bedrock" else "") +
+                    if (virtual) " · fast mode" else ""
             } else {
                 "${lang.name} · ${original.count { it == '\n' } + 1} lines" + if (d.readOnly) " · read-only" else ""
             }

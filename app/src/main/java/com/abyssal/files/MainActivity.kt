@@ -45,6 +45,9 @@ class MainActivity : ComponentActivity() {
         Pal.rgb = prefs.rgbAccent
         Pal.colorfulIcons = prefs.colorfulIcons
         PixelIcons.loadDefaults(assets)
+        // Create the icon state on the main thread: if the background icon reload created it while the first frame
+        // was composing, Compose would crash reading a state newer than its snapshot
+        CustomIcons.map
         granted = hasAccess()
         handleIntent()
         if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) vm.autoCheckUpdates()

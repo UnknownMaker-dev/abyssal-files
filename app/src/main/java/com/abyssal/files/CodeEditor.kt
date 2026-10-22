@@ -110,7 +110,9 @@ class CodeState(val lang: Lang) {
         // Consecutive keystrokes are undone together
         if (now - lastEdit > 800 || boundary || undoStack.isEmpty()) {
             undoStack.addLast(o.copy(composition = null))
-            if (undoStack.size > 300) undoStack.removeFirst()
+            // Each step is a copy of the file: big files keep fewer steps (~16 MB of history at most)
+            val cap = (8_000_000 / (o.text.length + 1)).coerceIn(20, 300)
+            while (undoStack.size > cap) undoStack.removeFirst()
         }
         lastEdit = now
         redoStack.clear()
@@ -362,9 +364,9 @@ fun highlight(text: String, lang: Lang, c: SyntaxColors, matches: List<Int> = em
     }
 
 /** Colours per line for the read-only viewer, in one pass over the tokens. */
-fun highlightLines(text: String, lang: Lang, c: SyntaxColors): List<AnnotatedString> {
+fun highlightLines(text: String, lang: Lang, c: SyntaxColors, limit: Int = HIGHLIGHT_LIMIT): List<AnnotatedString> {
     val toks = ArrayList<Triple<Int, Int, Tok>>()
-    if (text.length <= HIGHLIGHT_LIMIT && lang !== Langs.PLAIN) lang.scan(text) { s, e, t -> toks += Triple(s, e, t) }
+    if (text.length <= limit && lang !== Langs.PLAIN) lang.scan(text) { s, e, t -> toks += Triple(s, e, t) }
     val out = ArrayList<AnnotatedString>()
     var first = 0
     var ls = 0
@@ -485,7 +487,7 @@ fun CodeEditor(
                         CursorPopup(r.left.toInt() + padPx, r.top.toInt() + padPx, r.bottom.toInt() + padPx)
                     }
                     Popup(popupPositionProvider = provider, properties = PopupProperties(focusable = false)) {
-                        SuggestionList(completion.items.take(120)) { state.accept(it, completion) }
+                        SuggestionList(completion.items.take(120), fontSize) { state.accept(it, completion) }
                     }
                 }
             }
@@ -493,7 +495,7 @@ fun CodeEditor(
     }
 }
 
-private class CursorPopup(val x: Int, val top: Int, val bottom: Int) : PopupPositionProvider {
+internal class CursorPopup(val x: Int, val top: Int, val bottom: Int) : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize,
     ): IntOffset {
@@ -510,30 +512,32 @@ private val KIND_COLORS = mapOf(
     'C' to Color(0xFFFF9E64), 'S' to Color(0xFF9ECE6A), 'W' to Color(0xFF8B929B), 'P' to Color(0xFF7DCFFF),
 )
 
+/** The popup follows the editor's text size, but never gets smaller than ~75% of the normal size. */
 @Composable
-private fun SuggestionList(items: List<Suggestion>, onPick: (Suggestion) -> Unit) {
+internal fun SuggestionList(items: List<Suggestion>, fontSize: Int, onPick: (Suggestion) -> Unit) {
+    val k = (fontSize / 14f).coerceIn(0.75f, 1.2f)
     Column(
-        Modifier.width(310.dp).heightIn(max = 288.dp).clip(RoundedCornerShape(8.dp)).background(Panel2)
+        Modifier.width((290 * k).dp).heightIn(max = (250 * k).dp).clip(RoundedCornerShape(8.dp)).background(Panel2)
             .border(1.dp, Accent.copy(alpha = 0.35f), RoundedCornerShape(8.dp)).verticalScroll(rememberScrollState())
-            .padding(vertical = 4.dp),
+            .padding(vertical = 3.dp),
     ) {
         items.forEach { s ->
             Row(
-                Modifier.fillMaxWidth().clickable { onPick(s) }.padding(horizontal = 8.dp, vertical = 7.dp),
+                Modifier.fillMaxWidth().clickable { onPick(s) }.padding(horizontal = (7 * k).dp, vertical = (6 * k).dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val kc = KIND_COLORS.getValue(s.kind)
                 Box(
-                    Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).background(kc.copy(alpha = 0.2f)),
+                    Modifier.size((17 * k).dp).clip(RoundedCornerShape(4.dp)).background(kc.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center,
-                ) { Text(s.kind.toString(), color = kc, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                Spacer(Modifier.width(8.dp))
+                ) { Text(s.kind.toString(), color = kc, fontSize = (10 * k).sp, fontWeight = FontWeight.Bold) }
+                Spacer(Modifier.width((7 * k).dp))
                 Text(
-                    s.label, color = Ink, fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+                    s.label, color = Ink, fontSize = (13 * k).sp, fontFamily = FontFamily.Monospace,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
-                Text(s.detail, color = Dim, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 6.dp).widthIn(max = 110.dp))
+                Text(s.detail, color = Dim, fontSize = (10 * k).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 6.dp).widthIn(max = (105 * k).dp))
             }
         }
     }

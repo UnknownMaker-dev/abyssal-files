@@ -51,6 +51,49 @@ fun NameDialog(title: String, initial: String, onOk: (String) -> Unit, onDismiss
     )
 }
 
+private val RENAME_EXTS = listOf("mcpack", "mcaddon", "zip", "txt", "json", "js")
+
+/** Rename; for files, one tap swaps the extension (".zip" → ".mcpack" and so on). */
+@Composable
+fun RenameDialog(initial: String, isDir: Boolean, onOk: (String) -> Unit, onDismiss: () -> Unit) {
+    val end = initial.lastIndexOf('.').takeIf { it > 0 && !isDir } ?: initial.length
+    var text by remember { mutableStateOf(TextFieldValue(initial, TextRange(0, end))) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Panel2,
+        title = { Text("Rename", fontSize = 16.sp) },
+        text = {
+            Column {
+                OutlinedTextField(text, { text = it }, singleLine = true, modifier = Modifier.focusRequester(focus))
+                if (!isDir) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Change the extension", color = Dim, fontSize = 12.sp)
+                    Spacer(Modifier.height(4.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        RENAME_EXTS.forEach { ext ->
+                            FilterChip(
+                                selected = text.text.endsWith(".$ext", ignoreCase = true),
+                                onClick = {
+                                    val t = text.text
+                                    val dot = t.lastIndexOf('.')
+                                    val base = if (dot > 0) t.substring(0, dot) else t
+                                    val n = "$base.$ext"
+                                    text = TextFieldValue(n, TextRange(base.length))
+                                },
+                                label = { Text(".$ext") },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton({ onOk(text.text) }) { Text("OK") } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel", color = Dim) } },
+    )
+}
+
 private val QUICK_EXTS = listOf("txt", "json", "md", "html", "css", "js", "py", "xml", "csv", "sh", "kt", "log")
 
 @Composable

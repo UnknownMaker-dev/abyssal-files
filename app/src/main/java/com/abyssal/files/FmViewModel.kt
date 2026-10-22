@@ -65,6 +65,16 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     var editing by mutableStateOf<EditRequest?>(null); private set
     var settingsOpen by mutableStateOf(false)
 
+    /** Where each folder/list was scrolled to (first item, offset), so coming back lands in the same place. */
+    val scrollMemory = HashMap<String, Pair<Int, Int>>()
+
+    /** The current list, for [scrollMemory]. */
+    val scrollKey: String
+        get() = when (val s = screen) {
+            is Screen.Category -> "cat:${s.title}:${s.album ?: if (s.albums) "albums" else ""}"
+            else -> "dir:${dir.path}"
+        } + (query?.takeIf { it.isNotBlank() }?.let { ":search:$it" } ?: "")
+
     /** Full-screen image/video/archive viewers, topmost last. */
     var viewers by mutableStateOf<List<Viewer>>(emptyList()); private set
 
@@ -85,6 +95,50 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
             editing == null && viewers.isEmpty() && player.current == null
 
     private var job: Job? = null
+
+    // ---- SD card ----
+    val sd = SdCard(app)
+    /** SD card folder waiting for the user to allow access; [sdPending] runs once it's granted. */
+    var sdRequest by mutableStateOf<File?>(null); private set
+    private var sdPending: (() -> Unit)? = null
+
+    /** Runs [op] now, or after asking for SD card access when one of [targets] is on a card that needs it. */
+    fun withSd(vararg targets: File, op: () -> Unit) {
+        val t = targets.firstOrNull { !sd.canWrite(it) }
+        if (t == null) { op(); return }
+        sdPending = op
+        // A folder to grant: the target itself if it's a folder, else the one holding it
+        sdRequest = if (t.isDirectory) t else t.parentFile ?: t
+    }
+
+    fun onSdAccess(uri: Uri?) {
+        val folder = sdRequest ?: return
+        sdRequest = null
+        val op = sdPending.also { sdPending = null }
+        when {
+            uri == null -> message = "SD card access not given"
+            !sd.accept(uri, folder) -> message =
+                if (sd.wholeCard) "Choose the SD card itself (its top folder), then Allow"
+                else "Choose the folder you're changing (${displayName(folder.path)}) or one that contains it"
+            else -> op?.invoke()
+        }
+    }
+
+    fun cancelSdRequest() { sdRequest = null; sdPending = null }
+
+    /** Deletes through the Storage Access Framework when the card needs it. */
+    private fun deleteFile(f: File) {
+        if (sd.needsSaf(f)) sd.delete(f) else if (!f.deleteRecursively()) error("Could not delete ${f.name}")
+    }
+
+    /** Puts a file/folder made in the app cache at [dst] (on an SD card that needs the Storage Access Framework). */
+    private fun deliver(tmp: File, dstDir: File, name: String = tmp.name): File {
+        val n = FileOps.unique(dstDir, name, tmp.isDirectory).name
+        sd.copyInto(tmp, dstDir, n)
+        return File(dstDir, n)
+    }
+
+    private fun scratch(name: String) = File(getApplication<Application>().cacheDir, "sd/$name-${System.nanoTime()}").apply { mkdirs() }
     private var searchJob: Job? = null
     private var iconsLoaded = false
 
@@ -161,8 +215,12 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     // ---- brarchive ----
     /** Compiles pack folders (or .mcpack/.mcaddon/.zip files) into an optimized .mcpack/.mcaddon next to them. */
     fun compileBrarchive(paths: List<String>, name: String) {
+        val outDir = paths.firstOrNull()?.let { File(it).parentFile } ?: return
+        withSd(outDir) { compileBrarchiveNow(paths, name, outDir) }
+    }
+
+    private fun compileBrarchiveNow(paths: List<String>, name: String, outDir: File) {
         val inputs = paths.map(::File)
-        val outDir = inputs.firstOrNull()?.parentFile ?: return
         val cache = getApplication<Application>().cacheDir
         selected = emptySet()
         busy = true
@@ -175,7 +233,10 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
                         if (f.isFile) File(src, f.nameWithoutExtension).also { FileOps.unzip(f, it) } else f
                     }
                     try {
-                        Brarchive.compileToPackage(dirs, outDir, name.trim().ifEmpty { "pack" }, File(cache, "brarchive-work"))
+                        val viaSaf = sd.needsSaf(outDir)
+                        val out = if (viaSaf) scratch("compiled") else outDir
+                        val r = Brarchive.compileToPackage(dirs, out, name.trim().ifEmpty { "pack" }, File(cache, "brarchive-work"))
+                        if (viaSaf) (deliver(r.first, outDir) to r.second).also { out.deleteRecursively() } else r
                     } finally {
                         src.deleteRecursively()
                     }
@@ -527,53 +588,82 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     fun paste() {
         val c = clip ?: return
         val target = dir
-        runOp("Pasted ${c.files.size} item(s)") {
-            c.files.map(::File).forEach { f ->
-                val src = f.canonicalPath
-                val dst = target.canonicalPath
-                if (f.isDirectory && (dst == src || dst.startsWith(src + File.separator)))
-                    error("Can't paste a folder into itself")
-                if (c.cut) FileOps.move(f, target) else FileOps.copy(f, target)
+        val sources = c.files.map(::File)
+        withSd(target, *(if (c.cut) sources.toTypedArray() else emptyArray())) {
+            runOp("Pasted ${c.files.size} item(s)") {
+                sources.forEach { f ->
+                    val src = f.canonicalPath
+                    val dst = target.canonicalPath
+                    if (f.isDirectory && (dst == src || dst.startsWith(src + File.separator)))
+                        error("Can't paste a folder into itself")
+                    val viaSaf = sd.needsSaf(target) || (c.cut && sd.needsSaf(f))
+                    when {
+                        !viaSaf -> if (c.cut) FileOps.move(f, target) else FileOps.copy(f, target)
+                        c.cut && f.parentFile?.canonicalPath == dst -> {}
+                        c.cut && sd.rootOf(f) == sd.rootOf(target) && sd.needsSaf(f) && sd.move(f, target) -> {}
+                        else -> {
+                            if (sd.needsSaf(target)) deliver(f, target) else FileOps.copy(f, target)
+                            if (c.cut) deleteFile(f)
+                        }
+                    }
+                }
             }
+            clip = null
         }
-        clip = null
     }
 
     // ---- file operations ----
     fun deleteSelected() {
         val files = selected.map(::File)
-        runOp("Deleted ${files.size} item(s)", after = {
-            favorites = favorites.filterNot { p -> files.any { p == it.path || p.startsWith(it.path + "/") } }
-            prefs.favorites = favorites
-        }) {
-            files.forEach { if (!it.deleteRecursively()) error("Could not delete ${it.name}") }
+        withSd(*files.toTypedArray()) {
+            runOp("Deleted ${files.size} item(s)", after = {
+                favorites = favorites.filterNot { p -> files.any { p == it.path || p.startsWith(it.path + "/") } }
+                prefs.favorites = favorites
+            }) {
+                files.forEach { deleteFile(it) }
+            }
         }
     }
 
-    fun rename(item: FileItem, newName: String) = runOp("Renamed") {
-        validName(newName)
+    fun rename(item: FileItem, newName: String) {
         val f = File(item.path)
-        val t = File(f.parentFile, newName.trim())
-        if (t.exists()) error("Name already exists")
-        if (!f.renameTo(t)) error("Rename failed")
+        withSd(f) {
+            runOp("Renamed") {
+                validName(newName)
+                val t = File(f.parentFile, newName.trim())
+                if (t.exists()) error("Name already exists")
+                if (sd.needsSaf(f)) sd.rename(f, t.name) else if (!f.renameTo(t)) error("Rename failed")
+            }
+        }
     }
 
     fun newFolder(name: String) {
         val parent = dir
-        runOp("Folder created") {
-            validName(name)
-            if (!File(parent, name.trim()).mkdir()) error("Could not create folder")
+        withSd(parent) {
+            runOp("Folder created") {
+                validName(name)
+                if (File(parent, name.trim()).exists()) error("Name already exists")
+                if (sd.needsSaf(parent)) sd.mkdir(parent, name.trim())
+                else if (!File(parent, name.trim()).mkdir()) error("Could not create folder")
+            }
         }
     }
 
     fun newFile(name: String) {
         val parent = dir
         var created: File? = null
-        runOp("File created", after = {
-            created?.let { if (FileOps.editable(FileItem.of(it))) openEditor(it.path, edit = true) }
-        }) {
-            validName(name)
-            created = FileOps.createFile(parent, name.trim())
+        withSd(parent) {
+            runOp("File created", after = {
+                created?.let { if (FileOps.editable(FileItem.of(it))) openEditor(it.path, edit = true) }
+            }) {
+                validName(name)
+                val n = name.trim()
+                created = if (sd.needsSaf(parent)) {
+                    if (File(parent, n).exists()) error("Name already exists")
+                    sd.create(parent, n).use { o -> FileOps.template(n.substringAfterLast('.', "").lowercase())?.let { o.write(it.toByteArray()) } }
+                    File(parent, n)
+                } else FileOps.createFile(parent, n)
+            }
         }
     }
 
@@ -587,10 +677,17 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     fun zipSelected(name: String) {
         val files = selected.map(::File)
         val parent = files.firstOrNull()?.parentFile ?: return
-        runOp("Archive created") {
-            validName(name)
-            val n = name.trim().let { if (it.endsWith(".zip", true)) it else "$it.zip" }
-            FileOps.zip(files, FileOps.unique(parent, n, false))
+        withSd(parent) {
+            runOp("Archive created") {
+                validName(name)
+                val n = name.trim().let { if (it.endsWith(".zip", true)) it else "$it.zip" }
+                if (sd.needsSaf(parent)) {
+                    val tmp = scratch("zip")
+                    try {
+                        FileOps.zip(files, File(tmp, n)); deliver(File(tmp, n), parent)
+                    } finally { tmp.deleteRecursively() }
+                } else FileOps.zip(files, FileOps.unique(parent, n, false))
+            }
         }
     }
 
@@ -599,20 +696,38 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         val f = File(zipPath)
         val parent = f.parentFile ?: return
         var dest: File? = null
-        runOp("Extracted", after = { dest?.let { message = "Extracted to ${displayPath(it.path)}" } }) {
-            val d = when (mode) {
-                ExtractMode.HERE -> parent
-                ExtractMode.NAMED -> FileOps.unique(parent, f.nameWithoutExtension, true)
-                ExtractMode.TO -> target ?: parent
+        val into = if (mode == ExtractMode.TO) target ?: parent else parent
+        withSd(into) {
+            runOp("Extracted", after = { dest?.let { message = "Extracted to ${displayPath(it.path)}" } }) {
+                val d = when (mode) {
+                    ExtractMode.HERE -> parent
+                    ExtractMode.NAMED -> FileOps.unique(parent, f.nameWithoutExtension, true)
+                    ExtractMode.TO -> target ?: parent
+                }
+                dest = d
+                // An add-on's packs come out as folders, not as more archives to extract
+                val unpackPacks = entry == null && f.extension.equals("mcaddon", true)
+                if (sd.needsSaf(d)) {
+                    val tmp = scratch("extract")
+                    try {
+                        FileOps.unzip(f, tmp, entry)
+                        if (unpackPacks) FileOps.unpackNestedPacks(tmp)
+                        if (mode == ExtractMode.NAMED) deliver(tmp, parent, d.name)
+                        else tmp.listFiles()?.forEach { deliver(it, d) }
+                    } finally { tmp.deleteRecursively() }
+                } else {
+                    val before = d.list()?.toSet().orEmpty()
+                    FileOps.unzip(f, d, entry)
+                    if (unpackPacks) FileOps.unpackNestedPacks(d, only = d.list()?.toSet().orEmpty() - before)
+                }
             }
-            dest = d
-            FileOps.unzip(f, d, entry)
         }
     }
 
     fun deletePaths(paths: List<String>, after: () -> Unit = {}) {
-        runOp("Deleted ${paths.size} item(s)", after = after) {
-            paths.map(::File).forEach { if (!it.deleteRecursively()) error("Could not delete ${it.name}") }
+        val files = paths.map(::File)
+        withSd(*files.toTypedArray()) {
+            runOp("Deleted ${paths.size} item(s)", after = after) { files.forEach { deleteFile(it) } }
         }
     }
 

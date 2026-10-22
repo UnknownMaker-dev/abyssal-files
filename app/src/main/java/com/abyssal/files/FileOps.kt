@@ -172,7 +172,7 @@ object FileOps {
         return f
     }
 
-    private fun template(ext: String): String? = when (ext) {
+    fun template(ext: String): String? = when (ext) {
         "json" -> "{\n  \n}\n"
         "html", "htm" -> "<!doctype html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <title></title>\n</head>\n<body>\n\n</body>\n</html>\n"
         "xml" -> "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
@@ -248,6 +248,19 @@ object FileOps {
                 }
             }
         }
+    }
+
+    /** Packs inside an extracted add-on (.mcpack/.mcworld/.mctemplate) become folders named after them. */
+    fun unpackNestedPacks(dir: File, only: Set<String>? = null) {
+        dir.listFiles().orEmpty()
+            .filter { it.isFile && it.extension.lowercase() in setOf("mcpack", "mcworld", "mctemplate") }
+            .filter { only == null || it.name in only }
+            .forEach { pack ->
+                val out = unique(dir, pack.nameWithoutExtension, true)
+                runCatching { unzip(pack, out) }
+                    .onSuccess { pack.delete() }
+                    .onFailure { out.deleteRecursively() }
+            }
     }
 
     data class ZEntry(val path: String, val name: String, val isDir: Boolean, val size: Long, val compressed: Long, val time: Long)

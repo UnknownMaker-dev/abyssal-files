@@ -6,6 +6,8 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
@@ -82,6 +85,7 @@ fun FileManagerApp(vm: FmViewModel) {
                 onSaved = { vm.refresh(); vm.saveBack(edit) },
                 onOpenWith = { openWith(ctx, it) { m -> vm.message = m } },
                 onMsg = { vm.message = it },
+                onNeedSd = { f, retry -> vm.withSd(f) { retry() } },
             )
             vm.viewers.isNotEmpty() -> when (val v = vm.viewers.last()) {
                 is Viewer.Images -> ImageViewer(v, vm) { dlg = it }
@@ -109,9 +113,37 @@ fun FileManagerApp(vm: FmViewModel) {
 
     if (vm.updateDialog) UpdateDialog(vm)
 
+    // SD card: explain, then Android's "allow access" screen
+    val sdLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        vm.onSdAccess(r.data?.data.takeIf { r.resultCode == android.app.Activity.RESULT_OK })
+    }
+    vm.sdRequest?.let { root ->
+        AlertDialog(
+            onDismissRequest = { vm.cancelSdRequest() },
+            containerColor = Panel2,
+            icon = { PixIcon("sdcard", 40.dp) },
+            title = { Text("Allow SD card access", fontSize = 17.sp) },
+            text = {
+                Text(
+                    "On this phone, Android only lets apps change files on the memory card after you allow it once.\n\n" +
+                        if (vm.sd.wholeCard) "On the next screen, stay on the card's top folder and tap \"Use this folder\" → \"Allow\"."
+                        else "On the next screen, tap \"Use this folder\" → \"Allow\" on the folder that opens " +
+                            "(${vm.displayName(root.path)}), or on a folder that contains it. Android doesn't allow the whole card at once.",
+                    color = Dim, fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                TextButton({
+                    runCatching { sdLauncher.launch(vm.sd.accessIntent(root)) }.onFailure { vm.onSdAccess(null) }
+                }) { Text("Continue") }
+            },
+            dismissButton = { TextButton({ vm.cancelSdRequest() }) { Text("Cancel", color = Dim) } },
+        )
+    }
+
     val close = { dlg = null }
     when (val d = dlg) {
-        is Dlg.Rename -> NameDialog("Rename", d.item.name, { vm.rename(d.item, it); close() }, close)
+        is Dlg.Rename -> RenameDialog(d.item.name, d.item.isDir, { vm.rename(d.item, it); close() }, close)
         Dlg.NewFolder -> NameDialog("New folder", "", { vm.newFolder(it); close() }, close)
         Dlg.NewFile -> NewFileDialog({ vm.newFile(it); close() }, close)
         Dlg.ZipName -> NameDialog("Archive name", vm.defaultArchiveName(), { vm.zipSelected(it); close() }, close)
@@ -443,19 +475,21 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
         )
         val grid = vm.viewMode == ViewMode.GRID
         val gridCells = GridCells.Adaptive(vm.viewSize.tile)
+        val posKey = vm.scrollKey
+        val ready = list.isNotEmpty() && !vm.busy && !vm.searching
         val gridPad = PaddingValues(6.dp)
 
         val cat = vm.screen as? Screen.Category
         val noun = if (cat?.exts === FileOps.VIDEOS) "video" else "photo"
         Box(Modifier.weight(1f).pinchToResize { vm.resizeView(it) }) {
             if (cat != null && cat.album != null) {
-                MediaGrid(list, sel, vm.viewSize.media, onClick = onClick, onLong = onLong)
+                MediaGrid(list, sel, vm.viewSize.media, rememberGridPosition(vm, posKey, ready), onClick = onClick, onLong = onLong)
             } else if (cat != null && cat.albums && vm.query.isNullOrBlank()) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
-                AlbumGrid(vm, groups, noun, vm.viewSize.album)
+                AlbumGrid(vm, groups, noun, vm.viewSize.album, rememberGridPosition(vm, posKey, ready))
             } else if (cat != null && grid) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
-                LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), contentPadding = gridPad) {
+                LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), rememberGridPosition(vm, "$posKey:grid", ready), contentPadding = gridPad) {
                     groups.forEach { (folder, items) ->
                         item(key = "h:$folder", span = { GridItemSpan(maxLineSpan) }) {
                             GroupHeader(vm.displayName(folder), vm.displayPath(folder), items.size) { vm.openDir(File(folder)) }
@@ -465,7 +499,7 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
                 }
             } else if (cat != null) {
                 val groups = remember(list, vm.sort, vm.sortReversed) { FileOps.groupByFolder(list, vm.sort, vm.sortReversed) }
-                LazyColumn(Modifier.fillMaxSize()) {
+                LazyColumn(Modifier.fillMaxSize(), rememberListPosition(vm, posKey, ready)) {
                     groups.forEach { (folder, items) ->
                         stickyHeader(key = "h:$folder") {
                             GroupHeader(vm.displayName(folder), vm.displayPath(folder), items.size) { vm.openDir(File(folder)) }
@@ -481,12 +515,12 @@ fun BrowserScreen(vm: FmViewModel, ctx: Context, onDlg: (Dlg) -> Unit) {
                     color = Dim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
                 if (grid) {
-                    LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), contentPadding = gridPad) {
+                    LazyVerticalGrid(gridCells, Modifier.fillMaxSize(), rememberGridPosition(vm, "$posKey:grid", ready), contentPadding = gridPad) {
                         if (deep) item(key = "search-info", span = { GridItemSpan(maxLineSpan) }) { SearchInfo() }
                         items(list, key = { it.path }) { ItemTile(it, if (deep) vm.relativeParent(it) else null) }
                     }
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    LazyColumn(Modifier.fillMaxSize(), rememberListPosition(vm, posKey, ready)) {
                         if (deep) item(key = "search-info") { SearchInfo() }
                         items(list, key = { it.path }) { ItemRow(it, if (deep) vm.relativeParent(it) else null) }
                     }
@@ -681,10 +715,11 @@ private fun plural(n: Int, noun: String) = "$n $noun" + if (n == 1) "" else "s"
 
 /** Photos/Videos: one card per folder, newest item as cover, like a gallery app. */
 @Composable
-private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>>, noun: String, cell: Dp) {
+private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>>, noun: String, cell: Dp, state: LazyGridState) {
     LazyVerticalGrid(
         GridCells.Adaptive(cell),
         Modifier.fillMaxSize(),
+        state,
         contentPadding = PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -713,10 +748,11 @@ private fun AlbumGrid(vm: FmViewModel, groups: List<Pair<String, List<FileItem>>
 
 /** Inside an album: square thumbnails; long-press selects. */
 @Composable
-private fun MediaGrid(list: List<FileItem>, sel: Set<String>, cell: Dp, onClick: (FileItem) -> Unit, onLong: (FileItem) -> Unit) {
+private fun MediaGrid(list: List<FileItem>, sel: Set<String>, cell: Dp, state: LazyGridState, onClick: (FileItem) -> Unit, onLong: (FileItem) -> Unit) {
     LazyVerticalGrid(
         GridCells.Adaptive(cell),
         Modifier.fillMaxSize(),
+        state,
         contentPadding = PaddingValues(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),

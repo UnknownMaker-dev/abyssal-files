@@ -16,7 +16,9 @@ import androidx.compose.material.icons.automirrored.outlined.ViewList
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -138,4 +140,40 @@ fun FileTile(
             )
         }
     }
+}
+
+/**
+ * A list state that comes back to where it was for [key] (after opening a file, a subfolder…): the position is
+ * restored once the list has loaded ([ready]) and saved when the list goes away.
+ */
+@Composable
+fun rememberListPosition(vm: FmViewModel, key: String, ready: Boolean): LazyListState {
+    val state = remember(key) { LazyListState() }
+    var restored by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key, ready) {
+        if (ready && !restored) {
+            vm.scrollMemory[key]?.let { (i, o) -> runCatching { state.scrollToItem(i, o) } }
+            restored = true
+        }
+    }
+    DisposableEffect(key) {
+        onDispose { if (restored) vm.scrollMemory[key] = state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+    }
+    return state
+}
+
+@Composable
+fun rememberGridPosition(vm: FmViewModel, key: String, ready: Boolean): LazyGridState {
+    val state = remember(key) { LazyGridState() }
+    var restored by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(key, ready) {
+        if (ready && !restored) {
+            vm.scrollMemory[key]?.let { (i, o) -> runCatching { state.scrollToItem(i, o) } }
+            restored = true
+        }
+    }
+    DisposableEffect(key) {
+        onDispose { if (restored) vm.scrollMemory[key] = state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+    }
+    return state
 }

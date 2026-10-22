@@ -26,12 +26,15 @@ Created by Jh0nzxx and Unknown Maker
 - Built-in image viewer: swipe through the folder/album, pinch or double-tap to zoom, share, open with, properties, delete
 - Built-in video player: play/pause, seek bar, double-tap the sides for ±10 s, previous/next video, speed (0.5×–2×), rotate to landscape, full screen; pauses when the app goes to the background
 - Archive browser: tap a .zip / .jar / .mcpack / .mcaddon / .mcworld / .mctemplate to look inside without extracting; files open straight from it (images, videos, audio, text, nested archives)
-- Copy, cut/paste, rename, delete, zip, share, open with
-- Extract (.zip, .mcpack, .mcaddon, .mcworld, .jar…) from the archive browser's **Extract** button or by long-pressing the archive: **here** (next to the archive), **to "name/"** (new folder) or **to…** (pick any folder); long-press an item inside an archive to extract just that file or folder. Existing files are never overwritten (new copies get " (1)")
+- Copy, cut/paste, rename (with one-tap extension buttons: .mcpack, .mcaddon, .zip, .txt, .json, .js), delete, zip, share, open with
+- Lists remember where you were: back from a file, a viewer or a subfolder lands on the same spot
+- Extract (.zip, .mcpack, .mcaddon, .mcworld, .jar…) from the archive browser's **Extract** button or by long-pressing the archive: **here** (next to the archive), **to "name/"** (new folder) or **to…** (pick any folder); long-press an item inside an archive to extract just that file or folder. Existing files are never overwritten (new copies get " (1)"). Extracting a whole .mcaddon also unpacks the .mcpack/.mcworld files inside it into folders
 - Built-in code editor (IDE-style):
   - syntax colours for ~30 languages (Kotlin, Java, JS/TS, Python, C/C++, C#, Go, Rust, PHP, HTML, CSS, JSON, YAML, SQL, Shell, Markdown, Minecraft `.mcfunction`…)
   - autocomplete popup: keywords, functions, words from the file and snippets (`main`, `fun`, `for`, `html5`, `execute`, `tellraw`…)
   - line numbers, auto-indent, auto-closing brackets/quotes and HTML tags, undo/redo, find & replace
+  - files over 150 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
+  - the suggestion popup follows the editor's text size
   - extra keys above the keyboard (Tab, arrows, `{ } ( ) ; = < > /`…), word wrap and font size in the ⋮ menu
   - "Open with" sends the file to another app instead
   - **Bedrock mode** (switch in the editor's ⋮ menu or in Settings) for Minecraft Bedrock add-ons:
@@ -41,7 +44,7 @@ Created by Jh0nzxx and Unknown Maker
     - JSON: keys and values by position in the file (manifest, entities, items, blocks, recipes, loot tables, spawn rules, client entities, filters…), with ready-to-edit default values; in an empty file, whole templates (`manifest_bp`, `manifest_rp`, `manifest_script`, `entity`, `item`, `block`, `recipe_shaped`, `loot_table`) with freshly generated UUIDs
 - Built-in audio player
 - **Minecraft packs**:
-  - behavior/resource pack folders (any folder whose `manifest.json` has a resources/data/script module, including `development_*_packs`) show their own `pack_icon.png`
+  - behavior/resource pack folders (any folder whose `manifest.json` has a resources/data/script module, including `development_*_packs`) show their own `pack_icon.png` on the folder icon
   - **Compile to brarchive** (long-press pack folders or .mcpack/.mcaddon files → More): does on the phone what bedrock_server's PackOptimizer does: every folder of a resource pack becomes a `__brarchive/<folder>.brarchive` (JSON minified, images packed, sounds/.lang/invalid JSON left loose), the manifest gets `pack_optimization_version`, and the result is zipped as `.mcpack` (one resource pack) or `.mcaddon`. Checked file by file against real PackOptimizer output. Behavior packs are copied unchanged.
   - `.brarchive` files open in the archive browser (list, open, extract)
 - Works with other apps:
@@ -73,7 +76,7 @@ The logo is in `logo.png` (512 px) and `app/src/main/res/drawable-nodpi/logo.png
 ## Notes
 - Bedrock mode targets the stable Script API 2.x; adjust `"version"` in the manifest dependencies to match your Minecraft version.
 - The package is `com.abyssal.files`. Versions up to 1.1 were `com.example.lightfiles` ("Light Files"); uninstall that one first.
-- Writing to SD cards needs Android 11+ (all-files access). On Android 7–10 the SD card can be browsed but not modified.
+- SD cards: where Android lets the app write to the card directly (most phones on Android 11+), everything just works. Otherwise (Android 7–10, some ROMs) the first change asks once for access through Android's folder picker: the whole card on Android 7–10, or the folder being changed on Android 11+ (Android doesn't allow the whole card there).
 - Search stops after 3000 results. The editor edits files up to 1 MB (colours up to 300 KB) and shows larger ones read-only.
 - Google Play restricts MANAGE_EXTERNAL_STORAGE to file-manager apps and requires a declaration form.
 
