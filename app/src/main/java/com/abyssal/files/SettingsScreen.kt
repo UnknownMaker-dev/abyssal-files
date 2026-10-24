@@ -101,6 +101,17 @@ fun SettingsScreen(vm: FmViewModel) {
                     Text("Show hidden files", color = Ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Switch(vm.showHidden, { vm.toggleHidden() })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Overwrite existing files", color = Ink, fontSize = 14.sp)
+                        Text(
+                            if (vm.overwrite) "Paste and extract replace files with the same name (folders are merged)"
+                            else "Paste and extract keep both: the new copy gets \" (1)\"",
+                            color = Dim, fontSize = 12.sp,
+                        )
+                    }
+                    Switch(vm.overwrite, { vm.changeOverwrite(it) })
+                }
             }
 
             Label("Code editor")
@@ -124,6 +135,13 @@ fun SettingsScreen(vm: FmViewModel) {
                 Spacer(Modifier.height(10.dp))
                 var molang by remember { mutableStateOf(false) }
                 OutlinedButton({ molang = true }, Modifier.fillMaxWidth()) { Text("Molang query builder") }
+                val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+                var lastUuid by remember { mutableStateOf<String?>(null) }
+                OutlinedButton({
+                    val id = java.util.UUID.randomUUID().toString()
+                    clip.setText(androidx.compose.ui.text.AnnotatedString(id)); lastUuid = id
+                }, Modifier.fillMaxWidth()) { Text("Generate random UUID") }
+                lastUuid?.let { Text("Copied: $it", color = Dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
                 Text(
                     "Build Molang conditions without code and copy them. Typing q., v., math. or c. inside a JSON string " +
                         "in the editor also lists every query and function.",

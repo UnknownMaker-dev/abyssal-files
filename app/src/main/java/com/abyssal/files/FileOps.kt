@@ -135,6 +135,12 @@ object FileOps {
         return out
     }
 
+    /** Paste/extract: replace files that already exist (folders are merged) instead of adding " (1)". */
+    @Volatile var overwrite = false
+
+    /** Where [name] goes in [dir]: the same name when overwriting, else a free " (n)" name. */
+    fun target(dir: File, name: String, isDir: Boolean): File = if (overwrite) File(dir, name) else unique(dir, name, isDir)
+
     fun unique(dir: File, name: String, isDir: Boolean): File {
         var f = File(dir, name)
         if (!f.exists()) return f
@@ -150,15 +156,19 @@ object FileOps {
     }
 
     fun copy(src: File, dstDir: File): File {
-        val dst = unique(dstDir, src.name, src.isDirectory)
-        if (src.isDirectory) src.copyRecursively(dst, overwrite = false) else src.copyTo(dst)
+        // Copying onto itself always makes a copy
+        val same = src.parentFile?.canonicalPath == dstDir.canonicalPath
+        val dst = if (same) unique(dstDir, src.name, src.isDirectory) else target(dstDir, src.name, src.isDirectory)
+        if (dst.exists() && dst.isDirectory != src.isDirectory) dst.deleteRecursively()
+        if (src.isDirectory) src.copyRecursively(dst, overwrite = true) else src.copyTo(dst, overwrite = true)
         return dst
     }
 
     fun move(src: File, dstDir: File) {
         if (src.parentFile?.canonicalPath == dstDir.canonicalPath) return
-        val dst = unique(dstDir, src.name, src.isDirectory)
-        if (!src.renameTo(dst)) {
+        val dst = target(dstDir, src.name, src.isDirectory)
+        if (dst.exists() && dst.isFile) dst.delete()
+        if (dst.exists() || !src.renameTo(dst)) {
             copy(src, dstDir)
             src.deleteRecursively()
         }
@@ -224,7 +234,7 @@ object FileOps {
             outDir.mkdirs()
             for (it in Brarchive.list(zip)) {
                 if (it.size == 0 || (only != null && it.name != only)) continue
-                val t = unique(outDir, it.name, false)
+                val t = target(outDir, it.name, false)
                 if (!t.canonicalPath.startsWith(outDir.canonicalPath + File.separator)) throw SecurityException("Unsafe archive entry")
                 t.writeBytes(Brarchive.read(zip, it))
             }
@@ -243,7 +253,7 @@ object FileOps {
                 if (!t.canonicalPath.startsWith(base)) throw SecurityException("Unsafe archive entry")
                 if (e.isDirectory) t.mkdirs() else {
                     t.parentFile?.mkdirs()
-                    if (t.exists()) t = unique(t.parentFile!!, t.name, false)
+                    if (t.exists() && !overwrite) t = unique(t.parentFile!!, t.name, false)
                     z.getInputStream(e).use { i -> FileOutputStream(t).use { i.copyTo(it) } }
                 }
             }

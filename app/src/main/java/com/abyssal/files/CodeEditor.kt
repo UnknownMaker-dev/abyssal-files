@@ -453,7 +453,12 @@ fun CodeEditor(
         if (!wrap) hScroll.animateScrollTo((r.left.toInt() - hScroll.viewportSize / 3).coerceIn(0, hScroll.maxValue))
     }
 
-    val completion = remember(v.text, v.selection, state.docWords, state.bedrock) { state.complete() }
+    var computed by remember { mutableStateOf<Pair<String, Completion?>?>(null) }
+    LaunchedEffect(v.text, v.selection, state.docWords, state.bedrock) {
+        val t = v.text
+        computed = t to withContext(Dispatchers.Default) { runCatching { state.complete() }.getOrNull() }
+    }
+    val completion = computed?.takeIf { it.first === v.text }?.second
 
     BoxWithConstraints(modifier) {
         val viewportW = maxWidth
@@ -553,6 +558,10 @@ fun ExtraKeys(state: CodeState) {
         KeyIcon(Icons.AutoMirrored.Filled.KeyboardTab, "Tab") { state.tab() }
         KeyIcon(Icons.AutoMirrored.Filled.Undo, "Undo", state.canUndo) { state.undo() }
         KeyIcon(Icons.AutoMirrored.Filled.Redo, "Redo", state.canRedo) { state.redo() }
+        Box(
+            Modifier.fillMaxHeight().clickable { state.type(java.util.UUID.randomUUID().toString()) }.padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) { Text("UUID", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
         Key("◀") { state.move(-1) }
         Key("▶") { state.move(1) }
         "{ } ( ) [ ] ; : = \" ' < > / \\ | & ! # $ _ - + * % ` ? , . @ ~ ^".split(' ').forEach { k -> Key(k) { state.type(k) } }

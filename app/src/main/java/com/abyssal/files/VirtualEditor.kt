@@ -46,7 +46,7 @@ import kotlin.math.roundToInt
  * keystroke (seconds for a few thousand lines), so only the visible lines are drawn and only the cursor's
  * line is a text field.
  */
-const val VIRTUAL_LINES = 150
+const val VIRTUAL_LINES = 60
 
 /** Lines longer than this can't be virtualised (they'd be one giant field); such files use the classic editor. */
 const val VIRTUAL_MAX_LINE = 3000
@@ -72,6 +72,16 @@ fun lineOf(starts: IntArray, offset: Int): Int {
         if (starts[mid] <= offset) lo = mid else hi = mid - 1
     }
     return lo
+}
+
+/** Longest line from the line starts (no second pass over the text). */
+fun longestOf(starts: IntArray, length: Int): Int {
+    var best = 0
+    for (i in starts.indices) {
+        val end = if (i + 1 < starts.size) starts[i + 1] - 1 else length
+        if (end - starts[i] > best) best = end - starts[i]
+    }
+    return best
 }
 
 fun longestLine(text: String): Int {
@@ -114,10 +124,12 @@ fun VirtualCodeEditor(
     val lh = with(density) { lhPx.toDp() }
     val padPx = with(density) { 8.dp.toPx() }
 
-    val starts = remember(text) { lineStarts(text) }
+    // One pass per edit for both the line starts and the longest line
+    val layoutInfo = remember(text) { lineStarts(text).let { s -> s to longestOf(s, text.length) } }
+    val starts = layoutInfo.first
     val count = starts.size
     fun lineEnd(i: Int) = if (i + 1 < count) starts[i + 1] - 1 else text.length
-    val longest = remember(text) { longestLine(text) }
+    val longest = layoutInfo.second
     val cursor = v.selection.start.coerceIn(0, text.length)
     val active = lineOf(starts, cursor)
     val ls = starts[active]
@@ -172,7 +184,13 @@ fun VirtualCodeEditor(
     }
     LaunchedEffect(state.reveal) { if (state.reveal != 0) scrollToLine(active, center = true) }
 
-    val completion = remember(text, v.selection, state.docWords, state.bedrock) { state.complete() }
+    // Autocomplete runs off the main thread (Bedrock JSON scans the file up to the cursor); shown only if still current
+    var computed by remember { mutableStateOf<Pair<String, Completion?>?>(null) }
+    LaunchedEffect(text, v.selection, state.docWords, state.bedrock) {
+        val t = text
+        computed = t to withContext(Dispatchers.Default) { runCatching { state.complete() }.getOrNull() }
+    }
+    val completion = computed?.takeIf { it.first === text }?.second
     val sortedMatches = matches
 
     fun withMatches(base: AnnotatedString, lineStart: Int, shift: Int): AnnotatedString {

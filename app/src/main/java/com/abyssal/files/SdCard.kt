@@ -124,7 +124,7 @@ class SdCard(private val ctx: Context) {
 
     /**
      * Copies a local (readable) file or folder into [dstDir] on the card as [name]. Folders that already exist are
-     * merged; files that exist get " (1)".
+     * merged; files that exist get " (1)" (or are replaced when [FileOps.overwrite] is on).
      */
     fun copyInto(src: File, dstDir: File, name: String = src.name) {
         if (src.isDirectory) {
@@ -132,7 +132,9 @@ class SdCard(private val ctx: Context) {
             val d = if (existing.isDirectory) existing else mkdir(dstDir, name)
             src.listFiles()?.forEach { copyInto(it, d) }
         } else {
-            val n = if (File(dstDir, name).exists()) FileOps.unique(dstDir, name, false).name else name
+            val existing = File(dstDir, name)
+            if (existing.exists() && FileOps.overwrite) delete(existing)
+            val n = if (existing.exists() && !FileOps.overwrite) FileOps.unique(dstDir, name, false).name else name
             create(dstDir, n).use { o -> src.inputStream().use { it.copyTo(o) } }
         }
     }

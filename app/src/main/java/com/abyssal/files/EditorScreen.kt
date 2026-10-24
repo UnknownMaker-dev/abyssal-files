@@ -216,6 +216,14 @@ fun EditorScreen(
                         onClick = { menu = false; molang = true },
                     )
                     DropdownMenuItem(
+                        text = { Text("     " + if (editing) "Insert random UUID" else "Copy a random UUID", fontSize = 14.sp) },
+                        onClick = {
+                            menu = false
+                            val id = java.util.UUID.randomUUID().toString()
+                            if (editing) code.type(id) else { clipboard.setText(AnnotatedString(id)); onMsg("Copied $id") }
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("     Copy all", fontSize = 14.sp) },
                         onClick = {
                             menu = false

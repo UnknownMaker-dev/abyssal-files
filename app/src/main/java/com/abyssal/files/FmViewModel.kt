@@ -133,7 +133,8 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Puts a file/folder made in the app cache at [dst] (on an SD card that needs the Storage Access Framework). */
     private fun deliver(tmp: File, dstDir: File, name: String = tmp.name): File {
-        val n = FileOps.unique(dstDir, name, tmp.isDirectory).name
+        val n = FileOps.target(dstDir, name, tmp.isDirectory).name
+        File(dstDir, n).takeIf { it.isFile && FileOps.overwrite }?.let { sd.delete(it) }
         sd.copyInto(tmp, dstDir, n)
         return File(dstDir, n)
     }
@@ -420,6 +421,9 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         val all = ViewSize.entries
         changeViewSize(all[(viewSize.ordinal + step).coerceIn(0, all.lastIndex)])
     }
+
+    var overwrite by mutableStateOf(prefs.overwrite.also { FileOps.overwrite = it }); private set
+    fun changeOverwrite(on: Boolean) { overwrite = on; prefs.overwrite = on; FileOps.overwrite = on }
 
     fun toggleHidden() { showHidden = !showHidden; prefs.showHidden = showHidden; refresh(); rerunSearch() }
 

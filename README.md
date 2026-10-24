@@ -28,13 +28,14 @@ Created by Jh0nzxx and Unknown Maker
 - Archive browser: tap a .zip / .jar / .mcpack / .mcaddon / .mcworld / .mctemplate to look inside without extracting; files open straight from it (images, videos, audio, text, nested archives)
 - Copy, cut/paste, rename (with one-tap extension buttons: .mcpack, .mcaddon, .zip, .txt, .json, .js), delete, zip, share, open with
 - Lists remember where you were: back from a file, a viewer or a subfolder lands on the same spot
-- Extract (.zip, .mcpack, .mcaddon, .mcworld, .jar…) from the archive browser's **Extract** button or by long-pressing the archive: **here** (next to the archive), **to "name/"** (new folder) or **to…** (pick any folder); long-press an item inside an archive to extract just that file or folder. Existing files are never overwritten (new copies get " (1)"). Extracting a whole .mcaddon also unpacks the .mcpack/.mcworld files inside it into folders
+- Extract (.zip, .mcpack, .mcaddon, .mcworld, .jar…) from the archive browser's **Extract** button or by long-pressing the archive: **here** (next to the archive), **to "name/"** (new folder) or **to…** (pick any folder); long-press an item inside an archive to extract just that file or folder. Existing files are kept and new copies get " (1)", unless Settings → Files → **Overwrite existing files** is on (then files are replaced and folders merged; this also applies to paste). Extracting a whole .mcaddon also unpacks the .mcpack/.mcworld files inside it into folders
 - Built-in code editor (IDE-style):
   - syntax colours for ~30 languages (Kotlin, Java, JS/TS, Python, C/C++, C#, Go, Rust, PHP, HTML, CSS, JSON, YAML, SQL, Shell, Markdown, Minecraft `.mcfunction`…)
   - autocomplete popup: keywords, functions, words from the file and snippets (`main`, `fun`, `for`, `html5`, `execute`, `tellraw`…)
   - line numbers, auto-indent, auto-closing brackets/quotes and HTML tags, undo/redo, find & replace
-  - files over 150 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
-  - the suggestion popup follows the editor's text size
+  - files over 60 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
+  - the suggestion popup follows the editor's text size; suggestions are worked out in the background so typing never waits for them
+  - **UUID** key above the keyboard (and ⋮ → Insert random UUID) types a fresh random UUID; Settings → Code editor → Generate random UUID copies one
   - extra keys above the keyboard (Tab, arrows, `{ } ( ) ; = < > /`…), word wrap and font size in the ⋮ menu
   - "Open with" sends the file to another app instead
   - **Bedrock mode** (switch in the editor's ⋮ menu or in Settings) for Minecraft Bedrock add-ons:
