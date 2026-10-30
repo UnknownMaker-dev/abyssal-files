@@ -3,6 +3,8 @@
 package com.abyssal.files
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -49,6 +51,59 @@ fun NameDialog(title: String, initial: String, onOk: (String) -> Unit, onDismiss
         confirmButton = { TextButton({ onOk(text.text) }) { Text("OK") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel", color = Dim) } },
     )
+}
+
+/** Paste/extract: something with this name is already there. */
+@Composable
+fun ConflictDialog(c: FmViewModel.ConflictAsk, onAnswer: (Conflict, Boolean) -> Unit, onCancel: () -> Unit) {
+    var forAll by remember(c) { mutableStateOf(true) }
+    val what = if (c.isDir) "folder" else "file"
+    AlertDialog(
+        onDismissRequest = onCancel,
+        containerColor = Panel2,
+        title = { Text("\"${c.name}\" already exists", fontSize = 16.sp) },
+        text = {
+            Column {
+                Text("There's already a $what with this name in ${c.folder}.", color = Dim, fontSize = 14.sp)
+                Spacer(Modifier.height(12.dp))
+                ConflictChoice(
+                    "Overwrite",
+                    if (c.isDir) "Merge the folders; files with the same name are replaced" else "Replace the $what that's there",
+                    Danger,
+                ) { onAnswer(Conflict.OVERWRITE, forAll) }
+                ConflictChoice("Rename", "Keep both: the new one is saved as \"${renamed(c.name, c.isDir)}\"", Accent) {
+                    onAnswer(Conflict.RENAME, forAll)
+                }
+                ConflictChoice("Skip", "Leave the existing $what and don't copy this one", Ink) { onAnswer(Conflict.SKIP, forAll) }
+                if (c.others > 0) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { forAll = !forAll }.padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(forAll, { forAll = it })
+                        Text("Do the same for the other ${c.others} with the same name", color = Ink, fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onCancel) { Text("Cancel", color = Dim) } },
+    )
+}
+
+private fun renamed(name: String, isDir: Boolean): String {
+    val dot = name.lastIndexOf('.')
+    return if (!isDir && dot > 0) name.substring(0, dot) + " (1)" + name.substring(dot) else "$name (1)"
+}
+
+@Composable
+private fun ConflictChoice(title: String, detail: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        Text(title, color = color, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(detail, color = Dim, fontSize = 12.sp)
+    }
 }
 
 private val RENAME_EXTS = listOf("mcpack", "mcaddon", "zip", "txt", "json", "js")

@@ -101,17 +101,6 @@ fun SettingsScreen(vm: FmViewModel) {
                     Text("Show hidden files", color = Ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
                     Switch(vm.showHidden, { vm.toggleHidden() })
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Overwrite existing files", color = Ink, fontSize = 14.sp)
-                        Text(
-                            if (vm.overwrite) "Paste and extract replace files with the same name (folders are merged)"
-                            else "Paste and extract keep both: the new copy gets \" (1)\"",
-                            color = Dim, fontSize = 12.sp,
-                        )
-                    }
-                    Switch(vm.overwrite, { vm.changeOverwrite(it) })
-                }
             }
 
             Label("Code editor")

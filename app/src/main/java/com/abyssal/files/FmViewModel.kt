@@ -132,11 +132,53 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Puts a file/folder made in the app cache at [dst] (on an SD card that needs the Storage Access Framework). */
-    private fun deliver(tmp: File, dstDir: File, name: String = tmp.name): File {
-        val n = FileOps.target(dstDir, name, tmp.isDirectory).name
-        File(dstDir, n).takeIf { it.isFile && FileOps.overwrite }?.let { sd.delete(it) }
-        sd.copyInto(tmp, dstDir, n)
-        return File(dstDir, n)
+    private fun deliver(tmp: File, dstDir: File, name: String = tmp.name, policy: Conflict = Conflict.RENAME): File? {
+        val t = FileOps.place(dstDir, name, tmp.isDirectory, policy) ?: return null
+        sd.copyInto(tmp, dstDir, t.name, overwrite = policy == Conflict.OVERWRITE)
+        return t
+    }
+
+    // ---- name conflicts (paste / extract) ----
+    /** An item that already exists where it's going; the dialog answers overwrite / rename / skip. */
+    class ConflictAsk(val name: String, val isDir: Boolean, val folder: String, val others: Int)
+
+    var conflictAsk by mutableStateOf<ConflictAsk?>(null); private set
+    private var conflictQueue = ArrayDeque<Pair<String, Boolean>>()
+    private val conflictAnswers = HashMap<String, Conflict>()
+    private var conflictThen: ((Map<String, Conflict>) -> Unit)? = null
+    private var conflictFolder = ""
+
+    /** Asks about each of [conflicts] (name, is a folder) in [folder], then runs [then] with the answers. */
+    private fun askConflicts(conflicts: List<Pair<String, Boolean>>, folder: File, then: (Map<String, Conflict>) -> Unit) {
+        if (conflicts.isEmpty()) { then(emptyMap()); return }
+        conflictQueue = ArrayDeque(conflicts)
+        conflictAnswers.clear()
+        conflictThen = then
+        conflictFolder = displayName(folder.path)
+        nextConflict()
+    }
+
+    private fun nextConflict() {
+        val n = conflictQueue.removeFirstOrNull()
+        if (n == null) {
+            conflictAsk = null
+            val then = conflictThen.also { conflictThen = null }
+            then?.invoke(HashMap(conflictAnswers))
+            return
+        }
+        conflictAsk = ConflictAsk(n.first, n.second, conflictFolder, conflictQueue.size)
+    }
+
+    /** [forAll]: the same answer for every conflict still to come. */
+    fun answerConflict(choice: Conflict, forAll: Boolean) {
+        conflictAsk?.let { conflictAnswers[it.name] = choice }
+        if (forAll) { conflictQueue.forEach { conflictAnswers[it.first] = choice }; conflictQueue.clear() }
+        nextConflict()
+    }
+
+    fun cancelConflicts() {
+        conflictAsk = null; conflictQueue.clear(); conflictThen = null
+        message = "Cancelled"
     }
 
     private fun scratch(name: String) = File(getApplication<Application>().cacheDir, "sd/$name-${System.nanoTime()}").apply { mkdirs() }
@@ -266,7 +308,7 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
                         val viaSaf = sd.needsSaf(outDir)
                         val out = if (viaSaf) scratch("compiled") else outDir
                         val r = Brarchive.compileToPackage(dirs, out, name.trim().ifEmpty { "pack" }, File(cache, "brarchive-work"))
-                        if (viaSaf) (deliver(r.first, outDir) to r.second).also { out.deleteRecursively() } else r
+                        if (viaSaf) ((deliver(r.first, outDir) ?: r.first) to r.second).also { out.deleteRecursively() } else r
                     } finally {
                         src.deleteRecursively()
                     }
@@ -451,8 +493,6 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         changeViewSize(all[(viewSize.ordinal + step).coerceIn(0, all.lastIndex)])
     }
 
-    var overwrite by mutableStateOf(prefs.overwrite.also { FileOps.overwrite = it }); private set
-    fun changeOverwrite(on: Boolean) { overwrite = on; prefs.overwrite = on; FileOps.overwrite = on }
 
     fun toggleHidden() { showHidden = !showHidden; prefs.showHidden = showHidden; refresh(); rerunSearch() }
 
@@ -622,27 +662,38 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         val c = clip ?: return
         val target = dir
         val sources = c.files.map(::File)
-        withSd(target, *(if (c.cut) sources.toTypedArray() else emptyArray())) {
-            runOp("Pasted ${c.files.size} item(s)") {
-                sources.forEach { f ->
-                    val src = f.canonicalPath
-                    val dst = target.canonicalPath
-                    if (f.isDirectory && (dst == src || dst.startsWith(src + File.separator)))
-                        error("Can't paste a folder into itself")
-                    val viaSaf = sd.needsSaf(target) || (c.cut && sd.needsSaf(f))
-                    when {
-                        !viaSaf -> if (c.cut) FileOps.move(f, target) else FileOps.copy(f, target)
-                        c.cut && f.parentFile?.canonicalPath == dst -> {}
-                        c.cut && sd.rootOf(f) == sd.rootOf(target) && sd.needsSaf(f) && sd.move(f, target) -> {}
-                        else -> {
-                            if (sd.needsSaf(target)) deliver(f, target) else FileOps.copy(f, target)
-                            if (c.cut) deleteFile(f)
-                        }
-                    }
+        // Same name already in the target folder (copying into the same folder just makes a copy)
+        val conflicts = sources.filter { f ->
+            f.parentFile?.canonicalPath != target.canonicalPath && File(target, f.name).exists()
+        }.map { it.name to it.isDirectory }
+        askConflicts(conflicts, target) { answers ->
+            val skipped = answers.count { it.value == Conflict.SKIP }
+            if (skipped == sources.size) { message = "Nothing pasted"; clip = null; return@askConflicts }
+            withSd(target, *(if (c.cut) sources.toTypedArray() else emptyArray())) {
+                runOp("Pasted ${sources.size - skipped} item(s)" + if (skipped > 0) ", skipped $skipped" else "") {
+                    sources.forEach { f -> pasteOne(f, target, c.cut, answers[f.name] ?: Conflict.RENAME) }
                 }
+                clip = null
             }
-            clip = null
         }
+    }
+
+    private fun pasteOne(f: File, target: File, cut: Boolean, policy: Conflict) {
+        val src = f.canonicalPath
+        val dst = target.canonicalPath
+        if (f.isDirectory && (dst == src || dst.startsWith(src + File.separator))) error("Can't paste a folder into itself")
+        if (cut && f.parentFile?.canonicalPath == dst) return
+        val viaSaf = sd.needsSaf(target) || (cut && sd.needsSaf(f))
+        if (!viaSaf) {
+            if (cut) FileOps.move(f, target, policy) else FileOps.copy(f, target, policy)
+            return
+        }
+        val existing = File(target, f.name)
+        if (existing.exists() && policy == Conflict.SKIP) return
+        // Same card: let the provider move it (only when nothing is in the way)
+        if (cut && !existing.exists() && sd.rootOf(f) == sd.rootOf(target) && sd.needsSaf(f) && sd.move(f, target)) return
+        val placed = if (sd.needsSaf(target)) deliver(f, target, f.name, policy) else FileOps.copy(f, target, policy)
+        if (cut && placed != null) deleteFile(f)
     }
 
     // ---- file operations ----
@@ -730,28 +781,36 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         val parent = f.parentFile ?: return
         var dest: File? = null
         val into = if (mode == ExtractMode.TO) target ?: parent else parent
-        withSd(into) {
-            runOp("Extracted", after = { dest?.let { message = "Extracted to ${displayPath(it.path)}" } }) {
-                val d = when (mode) {
-                    ExtractMode.HERE -> parent
-                    ExtractMode.NAMED -> FileOps.unique(parent, f.nameWithoutExtension, true)
-                    ExtractMode.TO -> target ?: parent
-                }
-                dest = d
-                // An add-on's packs come out as folders, not as more archives to extract
-                val unpackPacks = entry == null && f.extension.equals("mcaddon", true)
-                if (sd.needsSaf(d)) {
-                    val tmp = scratch("extract")
-                    try {
-                        FileOps.unzip(f, tmp, entry)
-                        if (unpackPacks) FileOps.unpackNestedPacks(tmp)
-                        if (mode == ExtractMode.NAMED) deliver(tmp, parent, d.name)
-                        else tmp.listFiles()?.forEach { deliver(it, d) }
-                    } finally { tmp.deleteRecursively() }
-                } else {
-                    val before = d.list()?.toSet().orEmpty()
-                    FileOps.unzip(f, d, entry)
-                    if (unpackPacks) FileOps.unpackNestedPacks(d, only = d.list()?.toSet().orEmpty() - before)
+        val d = when (mode) {
+            ExtractMode.HERE -> parent
+            ExtractMode.NAMED -> FileOps.unique(parent, f.nameWithoutExtension, true)
+            ExtractMode.TO -> target ?: parent
+        }
+        viewModelScope.launch {
+            // A new "name/" folder never collides; otherwise ask about each top-level item that's already there
+            val conflicts = if (mode == ExtractMode.NAMED) emptyList()
+            else withContext(Dispatchers.IO) { runCatching { FileOps.extractConflicts(f, d, entry) }.getOrDefault(emptyList()) }
+            askConflicts(conflicts, d) { answers ->
+                val decide: (String) -> Conflict = { answers[it] ?: Conflict.RENAME }
+                withSd(into) {
+                    runOp("Extracted", after = { dest?.let { message = "Extracted to ${displayPath(it.path)}" } }) {
+                        dest = d
+                        // An add-on's packs come out as folders, not as more archives to extract
+                        val unpackPacks = entry == null && f.extension.equals("mcaddon", true)
+                        if (sd.needsSaf(d)) {
+                            val tmp = scratch("extract")
+                            try {
+                                FileOps.unzip(f, tmp, entry)
+                                if (unpackPacks) FileOps.unpackNestedPacks(tmp)
+                                if (mode == ExtractMode.NAMED) deliver(tmp, parent, d.name)
+                                else tmp.listFiles()?.forEach { deliver(it, d, it.name, decide(it.name)) }
+                            } finally { tmp.deleteRecursively() }
+                        } else {
+                            val before = d.list()?.toSet().orEmpty()
+                            FileOps.unzip(f, d, entry, decide)
+                            if (unpackPacks) FileOps.unpackNestedPacks(d, only = d.list()?.toSet().orEmpty() - before)
+                        }
+                    }
                 }
             }
         }

@@ -113,6 +113,7 @@ fun FileManagerApp(vm: FmViewModel) {
 
     if (vm.updateDialog) UpdateDialog(vm)
     CrashDialogs(vm)
+    vm.conflictAsk?.let { ConflictDialog(it, vm::answerConflict, vm::cancelConflicts) }
 
     // SD card: explain, then Android's "allow access" screen
     val sdLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->

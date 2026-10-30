@@ -45,6 +45,9 @@ data class FileItem(
     }
 }
 
+/** What to do when an item being pasted or extracted has the same name as one already there. */
+enum class Conflict { OVERWRITE, RENAME, SKIP }
+
 object FileOps {
     val IMAGES = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "avif", "tif", "tiff", "ico", "dng")
     val VIDEOS = setOf("mp4", "mkv", "webm", "3gp", "3g2", "avi", "mov", "m4v", "flv", "wmv", "mpg", "mpeg", "ogv")
@@ -135,11 +138,19 @@ object FileOps {
         return out
     }
 
-    /** Paste/extract: replace files that already exist (folders are merged) instead of adding " (1)". */
-    @Volatile var overwrite = false
-
-    /** Where [name] goes in [dir]: the same name when overwriting, else a free " (n)" name. */
-    fun target(dir: File, name: String, isDir: Boolean): File = if (overwrite) File(dir, name) else unique(dir, name, isDir)
+    /**
+     * Where [name] goes in [dir] when something with that name may already be there: the name itself if it's free or
+     * when overwriting (folders then merge), a free " (n)" name when renaming, null when skipping.
+     */
+    fun place(dir: File, name: String, isDir: Boolean, policy: Conflict): File? {
+        val f = File(dir, name)
+        if (!f.exists()) return f
+        return when (policy) {
+            Conflict.OVERWRITE -> f
+            Conflict.RENAME -> unique(dir, name, isDir)
+            Conflict.SKIP -> null
+        }
+    }
 
     fun unique(dir: File, name: String, isDir: Boolean): File {
         var f = File(dir, name)
@@ -155,23 +166,26 @@ object FileOps {
         }
     }
 
-    fun copy(src: File, dstDir: File): File {
+    /** Copies [src] into [dstDir]; [policy] decides when the name is taken. Null when skipped. */
+    fun copy(src: File, dstDir: File, policy: Conflict = Conflict.RENAME): File? {
         // Copying onto itself always makes a copy
         val same = src.parentFile?.canonicalPath == dstDir.canonicalPath
-        val dst = if (same) unique(dstDir, src.name, src.isDirectory) else target(dstDir, src.name, src.isDirectory)
+        val dst = (if (same) unique(dstDir, src.name, src.isDirectory) else place(dstDir, src.name, src.isDirectory, policy)) ?: return null
         if (dst.exists() && dst.isDirectory != src.isDirectory) dst.deleteRecursively()
         if (src.isDirectory) src.copyRecursively(dst, overwrite = true) else src.copyTo(dst, overwrite = true)
         return dst
     }
 
-    fun move(src: File, dstDir: File) {
-        if (src.parentFile?.canonicalPath == dstDir.canonicalPath) return
-        val dst = target(dstDir, src.name, src.isDirectory)
-        if (dst.exists() && dst.isFile) dst.delete()
+    /** Moves [src] into [dstDir]; false when skipped. */
+    fun move(src: File, dstDir: File, policy: Conflict = Conflict.RENAME): Boolean {
+        if (src.parentFile?.canonicalPath == dstDir.canonicalPath) return true
+        val dst = place(dstDir, src.name, src.isDirectory, policy) ?: return false
+        if (dst.exists() && (dst.isFile || !src.isDirectory)) dst.deleteRecursively()
         if (dst.exists() || !src.renameTo(dst)) {
-            copy(src, dstDir)
+            copy(src, dstDir, policy) ?: return false
             src.deleteRecursively()
         }
+        return true
     }
 
     fun createFile(dir: File, name: String): File {
@@ -226,38 +240,75 @@ object FileOps {
 
     /**
      * Extracts [zip] into [outDir]. With [only] ("dir/" or "dir/file") just that entry is extracted,
-     * placed directly in [outDir]. Existing files are kept: new ones get a " (1)" suffix.
+     * placed directly in [outDir]. When a top-level file or folder of the archive already exists in [outDir], [decide]
+     * says what to do with it (by name): rename (" (1)", the default), overwrite (folders merge) or skip.
      */
-    fun unzip(zip: File, outDir: File, only: String? = null) {
+    fun unzip(zip: File, outDir: File, only: String? = null, decide: (String) -> Conflict = { Conflict.RENAME }) {
+        outDir.mkdirs()
+        val existing = outDir.list()?.toHashSet().orEmpty()
+        val renamed = HashMap<String, String?>()
+        /** Where an entry goes, null = skipped. */
+        fun mapRel(rel: String, isDir: Boolean): String? {
+            val top = rel.substringBefore('/')
+            val rest = rel.substringAfter('/', "")
+            if (top !in existing) return rel
+            if (top !in renamed) renamed[top] = place(outDir, top, isDir || rest.isNotEmpty(), decide(top))?.name
+            val newTop = renamed[top] ?: return null
+            return if (rest.isEmpty()) newTop else "$newTop/$rest"
+        }
+        val base = outDir.canonicalPath + File.separator
+        fun write(rel: String, isDir: Boolean, data: () -> java.io.InputStream) {
+            val r = mapRel(rel, isDir) ?: return
+            val t = File(outDir, r)
+            if (!t.canonicalPath.startsWith(base)) throw SecurityException("Unsafe archive entry")
+            if (isDir) {
+                if (t.isFile) t.delete()
+                t.mkdirs()
+            } else {
+                t.parentFile?.mkdirs()
+                if (t.isDirectory) t.deleteRecursively()
+                data().use { i -> FileOutputStream(t).use { i.copyTo(it) } }
+            }
+        }
         if (zip.extension.equals("brarchive", true)) {
             // Flat archive: entries are plain file names; empty placeholders are skipped
-            outDir.mkdirs()
             for (it in Brarchive.list(zip)) {
                 if (it.size == 0 || (only != null && it.name != only)) continue
-                val t = target(outDir, it.name, false)
-                if (!t.canonicalPath.startsWith(outDir.canonicalPath + File.separator)) throw SecurityException("Unsafe archive entry")
-                t.writeBytes(Brarchive.read(zip, it))
+                write(it.name, false) { Brarchive.read(zip, it).inputStream() }
             }
             return
         }
-        outDir.mkdirs()
-        val base = outDir.canonicalPath + File.separator
         val strip = only?.trimEnd('/')?.substringBeforeLast('/', "")?.let { if (it.isEmpty()) "" else "$it/" } ?: ""
         openZip(zip).use { z ->
             for (e in z.entries()) {
                 val name = e.name.replace('\\', '/')
                 if (only != null && !(name == only || (only.endsWith("/") && name.startsWith(only)))) continue
-                val rel = name.removePrefix(strip)
+                val rel = name.removePrefix(strip).trimEnd('/')
                 if (rel.isEmpty()) continue
-                var t = File(outDir, rel)
-                if (!t.canonicalPath.startsWith(base)) throw SecurityException("Unsafe archive entry")
-                if (e.isDirectory) t.mkdirs() else {
-                    t.parentFile?.mkdirs()
-                    if (t.exists() && !overwrite) t = unique(t.parentFile!!, t.name, false)
-                    z.getInputStream(e).use { i -> FileOutputStream(t).use { i.copyTo(it) } }
+                write(rel, e.isDirectory) { z.getInputStream(e) }
+            }
+        }
+    }
+
+    /** Top-level names (name, is a folder) that extracting [zip] (or just [only]) into [outDir] would collide with. */
+    fun extractConflicts(zip: File, outDir: File, only: String? = null): List<Pair<String, Boolean>> {
+        val tops = LinkedHashMap<String, Boolean>()
+        if (zip.extension.equals("brarchive", true)) {
+            Brarchive.list(zip).filter { it.size > 0 && (only == null || it.name == only) }.forEach { tops[it.name] = false }
+        } else {
+            val strip = only?.trimEnd('/')?.substringBeforeLast('/', "")?.let { if (it.isEmpty()) "" else "$it/" } ?: ""
+            openZip(zip).use { z ->
+                for (e in z.entries()) {
+                    val name = e.name.replace('\\', '/')
+                    if (only != null && !(name == only || (only.endsWith("/") && name.startsWith(only)))) continue
+                    val rel = name.removePrefix(strip).trimEnd('/')
+                    if (rel.isEmpty()) continue
+                    val top = rel.substringBefore('/')
+                    tops[top] = (tops[top] ?: false) || '/' in rel || e.isDirectory
                 }
             }
         }
+        return tops.filter { File(outDir, it.key).exists() }.map { it.key to it.value }
     }
 
     /** Packs inside an extracted add-on (.mcpack/.mcworld/.mctemplate) become folders named after them. */

@@ -10,11 +10,6 @@ class Prefs(ctx: Context) {
         get() = sp.getInt("accent", DEFAULT_ACCENT)
         set(v) = sp.edit().putInt("accent", v).apply()
 
-    /** Paste/extract replace existing files instead of keeping both. */
-    var overwrite: Boolean
-        get() = sp.getBoolean("overwrite", false)
-        set(v) = sp.edit().putBoolean("overwrite", v).apply()
-
     var showHidden: Boolean
         get() = sp.getBoolean("hidden", false)
         set(v) = sp.edit().putBoolean("hidden", v).apply()
