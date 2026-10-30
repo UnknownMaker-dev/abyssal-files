@@ -5,4 +5,6 @@
     <root-path name="root" path="." />
     <!-- Files opened from inside archives -->
     <cache-path name="cache" path="." />
+    <!-- Crash logs, to share them -->
+    <files-path name="crashes" path="crashes/" />
 </paths>

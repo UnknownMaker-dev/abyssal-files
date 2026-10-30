@@ -56,6 +56,7 @@ Created by Jh0nzxx and Unknown Maker
 - Accent colour picker: the whole dark theme **and the icons** follow it; presets include `#4E4E4E`, `#BE0000` and **RGB** (cycles through every colour)
 - Pixel-art favourite stars
 - Compress to zip asks for the name (the first selected folder's name by default)
+- **Crash logs** (Settings → Crash logs): if the app closes by itself, the error is saved (version, device, Android version and the full stack trace) and offered on the next launch to read, copy or share. On Android 11+ "not responding" freezes and native crashes are picked up too. Copies are kept in `Internal storage/AbyssalFiles/crashes`. Each release has its `mapping-<version>.txt` attached, to turn a log into exact file and line numbers with R8's `retrace`
 - **Updates inside the app** (Settings → Updates): checks this repository's GitHub releases on launch (at most every 6 hours) or on demand, downloads the APK and hands it to Android's installer. Choose *Releases only* or *Betas too*
 
 ## Icons

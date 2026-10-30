@@ -161,8 +161,37 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     val canGoBack: Boolean
         get() = viewers.isNotEmpty() || settingsOpen || screen != Screen.Home || selected.isNotEmpty() || query != null
 
+    // ---- crash logs ----
+    var crashLogs by mutableStateOf<List<File>>(emptyList()); private set
+    /** A crash from a previous run the user hasn't seen yet. */
+    var newCrash by mutableStateOf<File?>(null)
+    /** The log open in the viewer. */
+    var viewingLog by mutableStateOf<File?>(null)
+
+    fun refreshCrashLogs() {
+        viewModelScope.launch { crashLogs = withContext(Dispatchers.IO) { CrashLog.list(getApplication()) } }
+    }
+
+    fun dismissNewCrash() { newCrash = null; CrashLog.markSeen(getApplication()) }
+
+    fun deleteCrashLogs() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { CrashLog.deleteAll(getApplication()) }
+            crashLogs = emptyList(); message = "Crash logs deleted"
+        }
+    }
+
     init {
         goHome()
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val (logs, unseen) = withContext(Dispatchers.IO) {
+                runCatching { CrashLog.collectSystemReports(app) }
+                CrashLog.list(app) to CrashLog.unseen(app)
+            }
+            crashLogs = logs
+            newCrash = unseen
+        }
         // Files opened from archives or sent by other apps are temporary
         viewModelScope.launch(Dispatchers.IO) { Incoming.cleanCache(app) }
     }

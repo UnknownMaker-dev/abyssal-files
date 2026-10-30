@@ -30,9 +30,16 @@ Quem decide entre beta e estável é o Claude, seguindo estes critérios:
 
 As notas da release ficam em inglês, como o app: uma lista curta do que mudou e, na beta, o que ainda falta confirmar.
 
+Toda release leva junto o mapping do R8, para os crash logs: `cp app/build/outputs/mapping/release/mapping.txt
+dist/mapping-X.Y[-beta.N].txt` e anexar esse arquivo na release, junto com o APK.
+
+Crash logs que o usuário mandar: baixar o mapping da versão que aparece no log e rodar
+`~/Android/Sdk/cmdline-tools/latest/bin/retrace mapping.txt log.txt`. Isso converte as linhas otimizadas em arquivo:linha
+exatos; os nomes já ficam legíveis porque a ofuscação está desligada (`app/proguard-rules.pro`).
+
 Comando base:
 ```
-GH_TOKEN=$(gh auth token -u UnknownMaker-dev) gh release create vX.Y[-beta.N] dist/explorer.apk \
+GH_TOKEN=$(gh auth token -u UnknownMaker-dev) gh release create vX.Y[-beta.N] dist/explorer.apk dist/mapping-X.Y[-beta.N].txt \
   --repo UnknownMaker-dev/abyssal-files --title "Abyssal Files X.Y[ beta N]" --notes "..." [--prerelease | --latest]
 ```
 

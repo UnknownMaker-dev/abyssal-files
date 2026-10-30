@@ -245,6 +245,9 @@ fun SettingsScreen(vm: FmViewModel) {
                 }
             }
 
+            Label("Crash logs")
+            Card { CrashLogsSection(vm) }
+
             Label("About")
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -11,14 +11,14 @@ android {
         applicationId = "com.abyssal.files"
         minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.9-beta.1"
+        versionCode = 15
+        versionName = "1.9-beta.2"
     }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Signed with the debug key so the APK can be sideloaded directly
             signingConfig = signingConfigs.getByName("debug")
         }
