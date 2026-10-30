@@ -143,6 +143,12 @@ fun EditorScreen(
         }
     }
 
+    // One-line (minified) JSON is far too slow to edit as is: offer to format it first
+    var askFormat by remember { mutableStateOf(false) }
+    fun startEditing() {
+        if (lang === Langs.JSON && longestLine(code.value.text) > VIRTUAL_MAX_LINE) askFormat = true else editing = true
+    }
+
     fun goTo(i: Int) {
         if (matches.isEmpty()) return
         current = (i + matches.size) % matches.size
@@ -177,13 +183,13 @@ fun EditorScreen(
             }
             val d = doc
             if (d is Doc.Ready && !d.readOnly && !req.readOnly) {
-                IconButton({ editing = true; finding = !finding }) { Icon(Icons.Outlined.Search, "Find", tint = Ink) }
+                IconButton({ startEditing(); if (editing) finding = !finding }) { Icon(Icons.Outlined.Search, "Find", tint = Ink) }
                 if (editing) {
                     IconButton({ save(close = false) }, enabled = dirty) {
                         Icon(Icons.Outlined.Save, "Save", tint = if (dirty) Accent else Dim)
                     }
                 } else {
-                    IconButton({ editing = true }) { Icon(Icons.Outlined.Edit, "Edit", tint = Ink) }
+                    IconButton({ startEditing() }) { Icon(Icons.Outlined.Edit, "Edit", tint = Ink) }
                 }
             }
             Box {
@@ -363,6 +369,37 @@ fun EditorScreen(
             val sel = code.value.selection
             code.replace(sel.min, sel.max, expr)
         } else null)
+    }
+
+    if (askFormat) {
+        val small = code.value.text.length < 60_000
+        AlertDialog(
+            onDismissRequest = { askFormat = false },
+            containerColor = Panel2,
+            title = { Text("Format this JSON?", fontSize = 16.sp) },
+            text = {
+                Text(
+                    "The file is all on one line (${FileOps.fmtSize(code.value.text.length.toLong())}). Editing it like that is very slow. " +
+                        "Formatting puts each key on its own line; the file is saved formatted when you tap Save.",
+                    color = Dim, fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                TextButton({
+                    askFormat = false
+                    val pretty = JsonPretty.format(code.value.text, lang.indent)
+                    code.replaceAll(pretty)
+                    virtual = lineStarts(pretty).size > VIRTUAL_LINES && longestLine(pretty) <= VIRTUAL_MAX_LINE
+                    editing = true
+                }) { Text("Format") }
+            },
+            dismissButton = {
+                Row {
+                    if (small) TextButton({ askFormat = false; editing = true }) { Text("Edit as is", color = Dim) }
+                    TextButton({ askFormat = false }) { Text("Cancel", color = Dim) }
+                }
+            },
+        )
     }
 
     if (confirmExit) {

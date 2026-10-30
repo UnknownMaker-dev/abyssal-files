@@ -33,6 +33,7 @@ Created by Jh0nzxx and Unknown Maker
   - syntax colours for ~30 languages (Kotlin, Java, JS/TS, Python, C/C++, C#, Go, Rust, PHP, HTML, CSS, JSON, YAML, SQL, Shell, Markdown, Minecraft `.mcfunction`…)
   - autocomplete popup: keywords, functions, words from the file and snippets (`main`, `fun`, `for`, `html5`, `execute`, `tellraw`…)
   - line numbers, auto-indent, auto-closing brackets/quotes and HTML tags, undo/redo, find & replace
+  - **Big JSON stays smooth**: one-line (minified) JSON is shown formatted, and editing it offers to format it first; JSON over 1500 lines opens with its inner blocks folded (`"bones": [ ⋯ 84000 lines ]`), with ▸/▾ next to the line numbers and *Fold all / Unfold all*; very long lines in any file are shown in pieces, so a single huge line can't freeze the viewer
   - files over 60 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
   - the suggestion popup follows the editor's text size; suggestions are worked out in the background so typing never waits for them
   - **UUID** key above the keyboard (and ⋮ → Insert random UUID) types a fresh random UUID; Settings → Code editor → Generate random UUID copies one

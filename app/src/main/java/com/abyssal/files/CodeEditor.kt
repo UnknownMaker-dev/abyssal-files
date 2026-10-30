@@ -583,28 +583,111 @@ private fun KeyIcon(icon: ImageVector, desc: String, enabled: Boolean = true, on
     ) { Icon(icon, desc, tint = if (enabled) Accent else Dim.copy(alpha = 0.4f), modifier = Modifier.size(20.dp)) }
 }
 
-/** Read-only view: virtualised lines, so even large files open instantly. */
+/** Long lines are shown in pieces of this many characters, so one huge line (minified files) can't freeze the list. */
+private const val CHUNK = 1000
+
+/** JSON files with more lines than this open with their inner blocks folded. */
+const val AUTO_FOLD_LINES = 1500
+
+private class ViewData(val text: String, val formatted: Boolean, val lines: List<String>, val folds: Folds?, val folded: Set<Int>)
+
+/**
+ * Read-only view: virtualised lines, so even large files open instantly. One-line (minified) JSON is shown formatted,
+ * JSON blocks fold (big files open folded), and very long lines are cut into pieces.
+ */
 @Composable
 fun CodeViewer(text: String, lang: Lang, fontSize: Int, modifier: Modifier = Modifier) {
     val colors = remember(Pal.accent) { SyntaxColors(Pal.accent) }
-    val plain = remember(text) { text.split('\n').map { AnnotatedString(it) } }
-    val lines by produceState(plain, text, lang, colors) {
-        value = withContext(Dispatchers.Default) { highlightLines(text, lang, colors) }
-    }
     val style = remember(fontSize) { editorStyle(fontSize) }
-    val numWidth = with(LocalDensity.current) { (lines.size.toString().length * fontSize * 0.62f + 14).sp.toDp() }
+    val data by produceState<ViewData?>(null, text, lang) {
+        value = withContext(Dispatchers.Default) {
+            val json = lang === Langs.JSON
+            val formatted = json && longestLine(text) > 2000
+            val shown = if (formatted) JsonPretty.format(text, lang.indent) else text
+            val lines = shown.split('\n')
+            val folds = if (json) Folds.of(shown) else null
+            ViewData(shown, formatted, lines, folds, if (folds != null && lines.size > AUTO_FOLD_LINES) folds.auto() else emptySet())
+        }
+    }
+    val d = data
+    if (d == null) {
+        Box(modifier.fillMaxSize(), Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = Accent) }
+        return
+    }
     if (text.isEmpty()) {
         Box(modifier.fillMaxSize(), Alignment.Center) { Text("Empty file — tap ✎ to write", color = Dim, fontSize = 13.sp) }
         return
     }
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-        itemsIndexed(lines) { i, line ->
-            Row(Modifier.padding(end = 10.dp)) {
+    val colored by produceState<List<AnnotatedString>?>(null, d, colors) {
+        value = withContext(Dispatchers.Default) { highlightLines(d.text, lang, colors, limit = 3_000_000) }
+    }
+    var collapsed by remember(d) { mutableStateOf(d.folded) }
+    val folds = d.folds
+    val rows = remember(d, collapsed) {
+        val vis = folds?.visible(collapsed) ?: IntArray(d.lines.size) { it }
+        val out = ArrayList<Long>(vis.size)
+        for (i in vis) {
+            val pieces = ((d.lines[i].length + CHUNK - 1) / CHUNK).coerceAtLeast(1)
+            for (k in 0 until pieces) out += (i.toLong() shl 20) or k.toLong()
+        }
+        out
+    }
+    val numWidth = with(LocalDensity.current) { (d.lines.size.toString().length * fontSize * 0.62f + 14).sp.toDp() }
+    val canFold = folds != null && (0 until folds.lines).any { folds.has(it) }
+
+    Column(modifier.fillMaxSize()) {
+        if (d.formatted || canFold) {
+            Row(
+                Modifier.fillMaxWidth().background(Panel).padding(horizontal = 12.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    "${i + 1}", style = style.copy(color = Dim.copy(alpha = 0.55f), textAlign = TextAlign.End),
-                    modifier = Modifier.width(numWidth).padding(end = 8.dp),
+                    if (d.formatted) "Shown formatted (the file is on one line)" else if (collapsed.isEmpty()) "${d.lines.size} lines" else "Some blocks are folded",
+                    color = Dim, fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                Text(line, style = style)
+                if (canFold) {
+                    Text("Fold all", color = Accent, fontSize = 12.sp, modifier = Modifier.clickable { collapsed = folds!!.deeperThan(1) }.padding(6.dp))
+                    Text("Unfold all", color = Accent, fontSize = 12.sp, modifier = Modifier.clickable { collapsed = emptySet() }.padding(6.dp))
+                }
+            }
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+            items(rows.size) { idx ->
+                val key = rows[idx]
+                val i = (key shr 20).toInt()
+                val piece = (key and 0xFFFFF).toInt()
+                val full = colored?.getOrNull(i) ?: AnnotatedString(d.lines[i])
+                val isFolded = piece == 0 && folds != null && i in collapsed && folds.has(i)
+                val content = when {
+                    isFolded -> buildAnnotatedString {
+                        append(full)
+                        withStyle(SpanStyle(color = Accent, background = Accent.copy(alpha = 0.15f))) {
+                            append(" ⋯ ${folds!!.end[i] - i - 1} lines ")
+                        }
+                        append(d.lines[folds.end[i]].trim())
+                    }
+                    full.length <= CHUNK -> full
+                    else -> full.subSequence(piece * CHUNK, minOf(full.length, (piece + 1) * CHUNK))
+                }
+                Row(Modifier.padding(end = 10.dp)) {
+                    Text(
+                        if (piece == 0) "${i + 1}" else "↪", style = style.copy(color = Dim.copy(alpha = 0.55f), textAlign = TextAlign.End),
+                        modifier = Modifier.width(numWidth).padding(end = 2.dp),
+                    )
+                    // Fold toggle
+                    Box(Modifier.width(16.dp), contentAlignment = Alignment.Center) {
+                        if (piece == 0 && folds != null && folds.has(i)) {
+                            Text(
+                                if (i in collapsed) "▸" else "▾", style = style.copy(color = Accent),
+                                modifier = Modifier.clickable { collapsed = if (i in collapsed) collapsed - i else collapsed + i },
+                            )
+                        }
+                    }
+                    Text(
+                        content, style = style,
+                        modifier = if (isFolded) Modifier.clickable { collapsed = collapsed - i } else Modifier,
+                    )
+                }
             }
         }
     }
