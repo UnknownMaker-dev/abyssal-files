@@ -19,3 +19,6 @@ captures/
 dist/
 *.apk
 *.aab
+
+# Reference material (third-party apps used for study, never published)
+ref/
