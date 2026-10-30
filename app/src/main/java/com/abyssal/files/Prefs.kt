@@ -18,6 +18,21 @@ class Prefs(ctx: Context) {
         get() = runCatching { Sort.valueOf(sp.getString("sort", null)!!) }.getOrDefault(Sort.NAME)
         set(v) = sp.edit().putString("sort", v.name).apply()
 
+    /** Order chosen per folder/category ("dir:/path" or "cat:Images" → sort, reversed); others use [sort]. */
+    var folderSorts: Map<String, Pair<Sort, Boolean>>
+        get() = runCatching {
+            val o = org.json.JSONObject(sp.getString("folderSorts", null) ?: return emptyMap())
+            o.keys().asSequence().mapNotNull { k ->
+                val v = o.getString(k).split(':')
+                runCatching { k to (Sort.valueOf(v[0]) to (v.getOrNull(1) == "1")) }.getOrNull()
+            }.toMap()
+        }.getOrDefault(emptyMap())
+        set(v) {
+            val o = org.json.JSONObject()
+            v.forEach { (k, s) -> o.put(k, "${s.first.name}:${if (s.second) 1 else 0}") }
+            sp.edit().putString("folderSorts", o.toString()).apply()
+        }
+
     var sortReversed: Boolean
         get() = sp.getBoolean("sortReversed", false)
         set(v) = sp.edit().putBoolean("sortReversed", v).apply()

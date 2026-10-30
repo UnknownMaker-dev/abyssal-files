@@ -406,6 +406,7 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
     fun openDir(f: File, record: Boolean = true) {
         settingsOpen = false
         screen = Screen.Dir; dir = f; selected = emptySet(); search(null)
+        applySort()
         if (record) {
             history = (listOf(f.path) + history.filterNot { it == f.path }).take(50)
             prefs.history = history
@@ -415,6 +416,7 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openCategory(title: String, exts: Set<String>, albums: Boolean = false) {
         screen = Screen.Category(title, exts, albums); selected = emptySet(); search(null)
+        applySort()
         refresh()
     }
 
@@ -475,11 +477,41 @@ class FmViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Picking the current sort again flips its direction. */
+    // ---- sorting: each folder/category keeps its own order ----
+    private val folderSorts = LinkedHashMap(prefs.folderSorts)
+
+    private val sortKey: String
+        get() = when (val s = screen) {
+            is Screen.Category -> "cat:${s.title}"
+            else -> "dir:${dir.path}"
+        }
+
+    /** Whether the current folder has its own order (otherwise it follows the default). */
+    val hasOwnSort: Boolean get() = sortKey in folderSorts
+
+    /** Loads the order of the folder/category just opened. */
+    private fun applySort() {
+        val own = folderSorts[sortKey]
+        sort = own?.first ?: prefs.sort
+        sortReversed = own?.second ?: prefs.sortReversed
+    }
+
+    /** Picking the current sort again flips its direction. Only this folder (or category) changes. */
     fun changeSort(s: Sort) {
         if (s == sort) sortReversed = !sortReversed else { sort = s; sortReversed = false }
-        prefs.sort = sort; prefs.sortReversed = sortReversed
+        folderSorts.remove(sortKey)
+        folderSorts[sortKey] = sort to sortReversed
+        // Keep the most recent 500 folders
+        while (folderSorts.size > 500) folderSorts.remove(folderSorts.keys.first())
+        prefs.folderSorts = folderSorts
         refresh(); rerunSearch()
+    }
+
+    /** Makes the current order the one used by folders that don't have their own. */
+    fun makeSortDefault() {
+        prefs.sort = sort; prefs.sortReversed = sortReversed
+        folderSorts.remove(sortKey); prefs.folderSorts = folderSorts
+        message = "Default order: ${sort.label}, ${if (sortReversed) sort.reversed else sort.normal}"
     }
 
     fun toggleReversed() { changeSort(sort) }

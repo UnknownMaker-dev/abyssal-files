@@ -20,7 +20,7 @@ Created by Jh0nzxx and Unknown Maker
 - The other categories (Audio, Documents, …) are grouped by the folder that holds the files
 - **List or grid view** (button in the top bar, ⋮ menu or Settings → View) in 4 sizes (S, M, L, XL); pinch with two fingers to resize. The size also applies to photo grids and albums
 - Search looks through the current folder **and all its subfolders**
-- Sort by name, date, size or type, in either direction (newest/oldest first, A→Z/Z→A…)
+- Sort by name, date, size or type, in either direction (newest/oldest first, A→Z/Z→A…). **Each folder (and each category) keeps its own order**; folders you never sorted use the default, which ⋮ → *Use this order as default* changes
 - Date and time on every row; **Properties** with size, contents, path, access, dimensions, duration…
 - Photo and video thumbnails
 - Built-in image viewer: swipe through the folder/album, pinch or double-tap to zoom, share, open with, properties, delete

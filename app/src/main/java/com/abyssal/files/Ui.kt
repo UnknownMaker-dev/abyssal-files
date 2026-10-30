@@ -610,6 +610,10 @@ private fun BrowserTopBar(vm: FmViewModel, onDlg: (Dlg) -> Unit) {
                     MenuItem("New file") { onDlg(Dlg.NewFile); menu = false }
                     HorizontalDivider(color = Panel)
                 }
+                Text(
+                    if (vm.hasOwnSort) "Order for this ${if (isDir) "folder" else "list"}" else "Order (default)",
+                    color = Dim, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 2.dp),
+                )
                 Sort.entries.forEach { s ->
                     val on = vm.sort == s
                     MenuItem(
@@ -617,6 +621,7 @@ private fun BrowserTopBar(vm: FmViewModel, onDlg: (Dlg) -> Unit) {
                     ) { vm.changeSort(s); menu = false }
                 }
                 MenuItem("Reverse order", vm.sortReversed) { vm.toggleReversed(); menu = false }
+                if (vm.hasOwnSort) MenuItem("Use this order as default") { vm.makeSortDefault(); menu = false }
                 MenuItem("Hidden files", vm.showHidden) { vm.toggleHidden(); menu = false }
                 HorizontalDivider(color = Panel)
                 MenuItem("Select all") { vm.selectAll(); menu = false }
