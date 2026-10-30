@@ -195,10 +195,11 @@ class CodeState(val lang: Lang) {
                 else -> n
             }
         }
-        // Backspace inside an empty pair removes both halves
-        if (t.length == o.text.length - 1 && p == os.start - 1 && codeLike) {
-            val del = o.text[os.start - 1]
-            if (o.text.getOrNull(os.start) == PAIRS[del]) return TextFieldValue(t.removeRange(p, p + 1), ns)
+        // Backspace inside an empty pair removes both halves. The deleted char must open a pair and its closer must
+        // follow (a plain letter at the end of the file has neither: null == null used to crash here)
+        if (t.length == o.text.length - 1 && p == os.start - 1 && codeLike && p < t.length) {
+            val close = PAIRS[o.text[os.start - 1]]
+            if (close != null && o.text.getOrNull(os.start) == close && t[p] == close) return TextFieldValue(t.removeRange(p, p + 1), ns)
         }
         return n
     }

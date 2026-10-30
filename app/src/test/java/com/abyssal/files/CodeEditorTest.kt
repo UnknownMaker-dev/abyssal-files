@@ -87,6 +87,23 @@ class CodeEditorTest {
         assertEquals("f", s.value.text)
     }
 
+    /** Crash from a Samsung A8 (1.9-beta.4): backspace on a plain char at the very end of the file. */
+    @Test fun backspaceAtEndOfFile() {
+        for (lang in listOf(Langs.JSON, Langs.JS, Langs.KOTLIN)) {
+            val s = CodeState(lang)
+            s.reset("{\"a\": 1}x"); s.onEdit(TextFieldValue("{\"a\": 1}x", TextRange(10)))
+            s.onEdit(TextFieldValue("{\"a\": 1}", TextRange(9)))
+            assertEquals("{\"a\": 1}", s.value.text)
+            // Deleting a closer or a char whose "pair" doesn't follow just deletes it
+            s.reset("(a)"); s.onEdit(TextFieldValue("(a)", TextRange(3)))
+            s.onEdit(TextFieldValue("(a", TextRange(2)))
+            assertEquals("(a", s.value.text)
+            s.reset("((x"); s.onEdit(TextFieldValue("((x", TextRange(2)))
+            s.onEdit(TextFieldValue("(x", TextRange(1)))
+            assertEquals("(x", s.value.text)
+        }
+    }
+
     @Test fun pythonColonIndent() {
         val s = CodeState(Langs.PYTHON)
         typeAt(s, "def f():", 8, "\n")
