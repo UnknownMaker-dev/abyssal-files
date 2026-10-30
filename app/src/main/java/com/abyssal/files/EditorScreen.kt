@@ -108,6 +108,14 @@ fun EditorScreen(
     var query by remember { mutableStateOf("") }
     var replacement by remember { mutableStateOf("") }
     var current by remember { mutableIntStateOf(0) }
+    // Ace (see AceEditor) edits when it's on; the built-in editors are the fallback
+    val aceOn = remember { prefs.aceEditor }
+    val aceState = remember(editing) {
+        if (editing && aceOn) AceState(lang, code.value.text, file.name, baseDirty = code.value.text != original) else null
+    }
+    val ace = aceState?.takeIf { !it.failed }
+    var aceCount by remember { mutableStateOf("0/0") }
+    SideEffect { aceState?.onFind = { finding = true } }
 
     LaunchedEffect(req.path, force) {
         val d = withContext(Dispatchers.IO) { load(file, force, onCard = sd.rootOf(file) != null) }
@@ -121,19 +129,17 @@ fun EditorScreen(
     }
 
     val text = code.value.text
-    val dirty = editing && text != original
-    val matches = remember(text, query, finding) { if (finding) findAll(text, query) else emptyList() }
+    val dirty = editing && (ace?.dirty ?: (text != original))
+    val matches = remember(text, query, finding, ace) { if (finding && ace == null) findAll(text, query) else emptyList() }
     if (current >= matches.size) current = 0
 
-    fun save(close: Boolean) {
-        // SD cards may need the user to allow access first; saving resumes afterwards
-        if (!sd.canWrite(file)) { onNeedSd(file) { save(close) }; return }
-        val t = code.value.text
+    fun write(t: String, close: Boolean, after: () -> Unit) {
         scope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching { if (sd.needsSaf(file)) sd.write(file).use { it.write(t.toByteArray()) } else file.writeText(t) }
             }
             r.onSuccess {
+                after()
                 original = t
                 modified = file.lastModified()
                 onSaved()
@@ -143,6 +149,13 @@ fun EditorScreen(
         }
     }
 
+    fun save(close: Boolean) {
+        // SD cards may need the user to allow access first; saving resumes afterwards
+        if (!sd.canWrite(file)) { onNeedSd(file) { save(close) }; return }
+        val a = ace
+        if (a != null) a.withText { write(it, close) { a.markClean() } } else write(code.value.text, close) {}
+    }
+
     // One-line (minified) JSON is far too slow to edit as is: offer to format it first
     var askFormat by remember { mutableStateOf(false) }
     fun startEditing() {
@@ -150,6 +163,7 @@ fun EditorScreen(
     }
 
     fun goTo(i: Int) {
+        ace?.let { a -> a.find(query, backwards = i < current, next = true) { aceCount = it }; return }
         if (matches.isEmpty()) return
         current = (i + matches.size) % matches.size
         code.select(matches[current], matches[current] + query.length)
@@ -226,21 +240,24 @@ fun EditorScreen(
                         onClick = {
                             menu = false
                             val id = java.util.UUID.randomUUID().toString()
-                            if (editing) code.type(id) else { clipboard.setText(AnnotatedString(id)); onMsg("Copied $id") }
+                            if (editing) (ace ?: code).type(id) else { clipboard.setText(AnnotatedString(id)); onMsg("Copied $id") }
                         },
                     )
                     DropdownMenuItem(
                         text = { Text("     Copy all", fontSize = 14.sp) },
                         onClick = {
                             menu = false
-                            clipboard.setText(AnnotatedString(code.value.text))
-                            onMsg("Copied ${code.value.text.count { it == '\n' } + 1} lines")
+                            fun copy(t: String) {
+                                clipboard.setText(AnnotatedString(t))
+                                onMsg("Copied ${t.count { it == '\n' } + 1} lines")
+                            }
+                            ace?.withText(::copy) ?: copy(code.value.text)
                         },
                     )
                     DropdownMenuItem(
                         text = {
                             Text(
-                                (if (wrap) "✓  " else "     ") + "Word wrap" + if (virtual && editing) " (not in long files)" else "",
+                                (if (wrap) "✓  " else "     ") + "Word wrap" + if (virtual && editing && ace == null) " (not in long files)" else "",
                                 fontSize = 14.sp,
                             )
                         },
@@ -262,26 +279,31 @@ fun EditorScreen(
         if (finding && editing) {
             Column(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 8.dp, vertical = 6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SmallField(query, "Find", Modifier.weight(1f), autoFocus = true) { query = it; current = 0 }
+                    SmallField(query, "Find", Modifier.weight(1f), autoFocus = true) {
+                        query = it; current = 0
+                        ace?.find(it, backwards = false, next = false) { c -> aceCount = c }
+                    }
                     Text(
-                        if (matches.isEmpty()) "0/0" else "${current + 1}/${matches.size}",
+                        if (ace != null) aceCount else if (matches.isEmpty()) "0/0" else "${current + 1}/${matches.size}",
                         color = Dim, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp),
                     )
                     IconButton({ goTo(current - 1) }, Modifier.size(36.dp)) { Icon(Icons.Default.KeyboardArrowUp, "Previous", tint = Ink) }
                     IconButton({ goTo(current + 1) }, Modifier.size(36.dp)) { Icon(Icons.Default.KeyboardArrowDown, "Next", tint = Ink) }
-                    IconButton({ finding = false }, Modifier.size(36.dp)) { Icon(Icons.Default.Close, "Close find", tint = Dim) }
+                    IconButton({ finding = false; ace?.focus() }, Modifier.size(36.dp)) { Icon(Icons.Default.Close, "Close find", tint = Dim) }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SmallField(replacement, "Replace with", Modifier.weight(1f)) { replacement = it }
                     TextButton({
-                        if (matches.isNotEmpty()) {
+                        if (ace != null) ace.replaceOne(query, replacement) { aceCount = it }
+                        else if (matches.isNotEmpty()) {
                             val s = matches[current]
                             code.replace(s, s + query.length, replacement)
                         }
                     }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("Replace", fontSize = 13.sp) }
                     TextButton({
-                        if (matches.isNotEmpty()) {
+                        if (ace != null) ace.replaceAll(query, replacement) { n -> aceCount = "0/0"; onMsg("Replaced $n") }
+                        else if (matches.isNotEmpty()) {
                             val sb = StringBuilder(text)
                             matches.asReversed().forEach { sb.replace(it, it + query.length, replacement) }
                             code.replaceAll(sb.toString())
@@ -323,7 +345,9 @@ fun EditorScreen(
                             modifier = Modifier.fillMaxWidth().background(Panel).padding(horizontal = 12.dp, vertical = 4.dp),
                         )
                     }
-                    if (editing && virtual) {
+                    if (editing && ace != null) {
+                        AceEditor(ace, code, fontSize, wrap, showSuggestions = !finding, Modifier.weight(1f).fillMaxWidth())
+                    } else if (editing && virtual) {
                         VirtualCodeEditor(
                             code, fontSize, matches, query.length, if (finding) current else -1,
                             Modifier.weight(1f).fillMaxWidth(),
@@ -344,7 +368,9 @@ fun EditorScreen(
         val d = doc
         if (d is Doc.Ready) {
             val sel = code.value.selection.start
-            val status = if (editing) {
+            val status = if (editing && ace != null) {
+                "${lang.name} · Ln ${ace.row + 1}, Col ${ace.col + 1} · ${lang.indent} spaces" + if (code.bedrockActive) " · Bedrock" else ""
+            } else if (editing) {
                 val p = sel.coerceAtMost(text.length)
                 var ln = 1
                 for (i in 0 until p) if (text[i] == '\n') ln++
@@ -358,7 +384,7 @@ fun EditorScreen(
                 status, color = Dim, fontSize = 11.sp,
                 modifier = Modifier.fillMaxWidth().background(Bg).padding(horizontal = 12.dp, vertical = 3.dp),
             )
-            if (editing) ExtraKeys(code)
+            if (editing) ExtraKeys(ace ?: code)
         }
     }
 
@@ -366,6 +392,7 @@ fun EditorScreen(
         val d = doc
         val canInsert = editing && d is Doc.Ready && !d.readOnly && !req.readOnly
         MolangBuilderDialog(onDismiss = { molang = false }, onInsert = if (canInsert) { expr ->
+            ace?.let { it.type(expr); return@MolangBuilderDialog }
             val sel = code.value.selection
             code.replace(sel.min, sel.max, expr)
         } else null)

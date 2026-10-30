@@ -11,8 +11,8 @@ android {
         applicationId = "com.abyssal.files"
         minSdk = 24
         targetSdk = 35
-        versionCode = 19
-        versionName = "1.9-beta.6"
+        versionCode = 20
+        versionName = "1.9-beta.7"
     }
     buildTypes {
         release {

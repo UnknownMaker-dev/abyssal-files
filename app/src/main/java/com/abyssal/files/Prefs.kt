@@ -75,6 +75,11 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("editorWrap", false)
         set(v) = sp.edit().putBoolean("editorWrap", v).apply()
 
+    /** Edit with Ace in a WebView (fast on big files); off = the built-in Compose editor. */
+    var aceEditor: Boolean
+        get() = sp.getBoolean("aceEditor", true)
+        set(v) = sp.edit().putBoolean("aceEditor", v).apply()
+
     var bedrockMode: Boolean
         get() = sp.getBoolean("bedrockMode", false)
         set(v) = sp.edit().putBoolean("bedrockMode", v).apply()

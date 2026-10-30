@@ -122,6 +122,21 @@ fun SettingsScreen(vm: FmViewModel) {
                     Switch(bedrock, { bedrock = it; prefs.bedrockMode = it })
                 }
                 Spacer(Modifier.height(10.dp))
+                var ace by remember { mutableStateOf(prefs.aceEditor) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PixIcon("code", 28.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Fast editor (Ace)", color = Ink, fontSize = 14.sp)
+                        Text(
+                            "The Ace engine draws only the lines on screen, so big files type without lag. " +
+                                "Turn off to use the simple built-in editor.",
+                            color = Dim, fontSize = 12.sp,
+                        )
+                    }
+                    Switch(ace, { ace = it; prefs.aceEditor = it })
+                }
+                Spacer(Modifier.height(10.dp))
                 var molang by remember { mutableStateOf(false) }
                 OutlinedButton({ molang = true }, Modifier.fillMaxWidth()) { Text("Molang query builder") }
                 val clip = androidx.compose.ui.platform.LocalClipboardManager.current

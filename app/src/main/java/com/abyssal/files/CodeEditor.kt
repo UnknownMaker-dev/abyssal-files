@@ -67,8 +67,19 @@ data class Suggestion(val label: String, val insert: String, val kind: Char, val
 /** Suggestions replacing text[start, end). */
 data class Completion(val start: Int, val end: Int, val items: List<Suggestion>)
 
+/** What the extra-keys bar drives: the built-in editor ([CodeState]) or Ace ([AceState]). */
+interface EditorKeys {
+    val canUndo: Boolean
+    val canRedo: Boolean
+    fun tab()
+    fun undo()
+    fun redo()
+    fun type(s: String)
+    fun move(delta: Int)
+}
+
 /** Text, undo/redo history and the "smart" editing rules of the code editor. */
-class CodeState(val lang: Lang) {
+class CodeState(val lang: Lang) : EditorKeys {
     /** Minecraft Bedrock autocomplete for JS/TS (Script API) and JSON (add-ons). */
     var bedrock by mutableStateOf(false)
     val bedrockActive get() = bedrock && (lang === Langs.JS || lang === Langs.TS || lang === Langs.JSON)
@@ -78,8 +89,8 @@ class CodeState(val lang: Lang) {
     private val undoStack = ArrayDeque<TextFieldValue>()
     private val redoStack = ArrayDeque<TextFieldValue>()
     private var lastEdit = 0L
-    var canUndo by mutableStateOf(false); private set
-    var canRedo by mutableStateOf(false); private set
+    override var canUndo by mutableStateOf(false); private set
+    override var canRedo by mutableStateOf(false); private set
 
     /** Bumped when the editor should scroll the cursor/selection into view. */
     var reveal by mutableIntStateOf(0); private set
@@ -119,13 +130,13 @@ class CodeState(val lang: Lang) {
         sync()
     }
 
-    fun undo() {
+    override fun undo() {
         val p = undoStack.removeLastOrNull() ?: return
         redoStack.addLast(value)
         value = p; lastEdit = 0; sync(); reveal++
     }
 
-    fun redo() {
+    override fun redo() {
         val p = redoStack.removeLastOrNull() ?: return
         undoStack.addLast(value)
         value = p; lastEdit = 0; sync(); reveal++
@@ -134,15 +145,15 @@ class CodeState(val lang: Lang) {
     private fun sync() { canUndo = undoStack.isNotEmpty(); canRedo = redoStack.isNotEmpty() }
 
     /** Extra-keys bar input: goes through the same rules as the keyboard. */
-    fun type(s: String) {
+    override fun type(s: String) {
         val v = value
         val sel = v.selection
         onEdit(TextFieldValue(v.text.replaceRange(sel.min, sel.max, s), TextRange(sel.min + s.length)))
     }
 
-    fun tab() = type(unit)
+    override fun tab() = type(unit)
 
-    fun move(delta: Int) {
+    override fun move(delta: Int) {
         val p = (value.selection.start + delta).coerceIn(0, value.text.length)
         value = value.copy(selection = TextRange(p), composition = null)
     }
@@ -253,8 +264,7 @@ class CodeState(val lang: Lang) {
     private fun isWord(c: Char) = c.isLetterOrDigit() || c == '_' || c in lang.wordExtra
 
     /** Start offset and text of the word being typed, if any. */
-    fun prefix(): Pair<Int, String>? {
-        val v = value
+    fun prefix(v: TextFieldValue = value): Pair<Int, String>? {
         if (!v.selection.collapsed) return null
         val p = v.selection.start
         var s = p
@@ -281,9 +291,8 @@ class CodeState(val lang: Lang) {
         ).take(8)
     }
 
-    /** What the popup shows for the current cursor, or null. */
-    fun complete(): Completion? {
-        val v = value
+    /** What the popup shows for the cursor of [v] (the editor's text by default), or null. */
+    fun complete(v: TextFieldValue = value): Completion? {
         if (!v.selection.collapsed) return null
         val cur = v.selection.start
         // Molang inside JSON strings: q. / query. / math. / v. / t. / c.
@@ -294,7 +303,7 @@ class CodeState(val lang: Lang) {
             val c = if (lang === Langs.JSON) Bedrock.completeJson(v.text, cur) else Bedrock.completeJs(v.text, cur)
             if (c != null) return c.takeIf { it.items.isNotEmpty() }
         }
-        val (start, word) = prefix() ?: return null
+        val (start, word) = prefix(v) ?: return null
         var items = suggestions(word)
         if (bedrockActive && lang !== Langs.JSON) {
             items = (Bedrock.jsGlobals(word) + items).distinctBy { it.label }.take(10)
@@ -304,18 +313,26 @@ class CodeState(val lang: Lang) {
 
     /** Replaces [c]'s range; snippets keep the line's indentation and place the cursor at "$0". */
     fun accept(s: Suggestion, c: Completion) {
-        val v = value
-        val start = c.start.coerceIn(0, v.text.length)
-        val end = c.end.coerceIn(start, v.text.length)
-        val ls = v.text.lastIndexOf('\n', start - 1) + 1
-        val indent = v.text.substring(ls, start).takeWhile { it == ' ' || it == '\t' }
-        var text = s.insert.replace("\n", "\n$indent")
-        val cur = text.indexOf("$0").let { if (it >= 0) it else text.length }
-        text = text.replace("$0", "")
+        val (start, end, text, cur) = expand(value.text, s, c)
         replace(start, end, text, start + cur)
     }
 
     companion object {
+        data class Insertion(val start: Int, val end: Int, val text: String, val caret: Int)
+
+        /** [s] ready to replace [c]'s range of [doc]: indented like the line, "$0" removed and turned into [Insertion.caret]. */
+        fun expand(doc: CharSequence, s: Suggestion, c: Completion): Insertion {
+            val start = c.start.coerceIn(0, doc.length)
+            val end = c.end.coerceIn(start, doc.length)
+            var ls = start
+            while (ls > 0 && doc[ls - 1] != '\n') ls--
+            val indent = doc.subSequence(ls, start).takeWhile { it == ' ' || it == '\t' }
+            var text = s.insert.replace("\n", "\n$indent")
+            val cur = text.indexOf("$0").let { if (it >= 0) it else text.length }
+            text = text.replace("$0", "")
+            return Insertion(start, end, text, cur)
+        }
+
         val KIND_NAMES = mapOf(
             'K' to "keyword", 'T' to "type", 'F' to "function", 'C' to "constant", 'S' to "snippet", 'W' to "word", 'P' to "property",
         )
@@ -551,7 +568,7 @@ internal fun SuggestionList(items: List<Suggestion>, fontSize: Int, onPick: (Sug
 
 /** Keys that are awkward on a phone keyboard, shown above it while editing. */
 @Composable
-fun ExtraKeys(state: CodeState) {
+fun ExtraKeys(state: EditorKeys) {
     Row(
         Modifier.fillMaxWidth().height(42.dp).background(Panel).horizontalScroll(rememberScrollState()),
         verticalAlignment = Alignment.CenterVertically,

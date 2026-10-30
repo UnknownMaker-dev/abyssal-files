@@ -30,11 +30,12 @@ Created by Jh0nzxx and Unknown Maker
 - Lists remember where you were: back from a file, a viewer or a subfolder lands on the same spot
 - Extract (.zip, .mcpack, .mcaddon, .mcworld, .jar…) from the archive browser's **Extract** button or by long-pressing the archive: **here** (next to the archive), **to "name/"** (new folder) or **to…** (pick any folder); long-press an item inside an archive to extract just that file or folder. When something with the same name is already there, a dialog asks what to do: **Overwrite** (folders are merged), **Rename** (the new one becomes "name (1)") or **Skip**, with "do the same for the others" when there are several. Extracting a whole .mcaddon also unpacks the .mcpack/.mcworld files inside it into folders
 - Built-in code editor (IDE-style):
+  - edits with **[Ace](https://ace.c9.io)**, the engine of the Acode app, inside a WebView: it keeps the text as a list of lines, colours it in the background from the edited line on and draws only the rows on screen, so typing doesn't lag even in 17,000-line geometry files. Folding, bracket matching, indent guides, multi-line selection and the touch Copy/Paste menu come with it; the app's own autocomplete (Bedrock, Molang, snippets), find & replace, extra keys and UUID key work on top. Settings → Code editor → *Fast editor (Ace)* switches back to the simple built-in editor
   - syntax colours for ~30 languages (Kotlin, Java, JS/TS, Python, C/C++, C#, Go, Rust, PHP, HTML, CSS, JSON, YAML, SQL, Shell, Markdown, Minecraft `.mcfunction`…)
   - autocomplete popup: keywords, functions, words from the file and snippets (`main`, `fun`, `for`, `html5`, `execute`, `tellraw`…)
   - line numbers, auto-indent, auto-closing brackets/quotes and HTML tags, undo/redo, find & replace
   - **Big JSON stays smooth**: one-line (minified) JSON is shown formatted, and editing it offers to format it first; JSON over 1500 lines opens with its inner blocks folded (`"bones": [ ⋯ 84000 lines ]`), with ▸/▾ next to the line numbers and *Fold all / Unfold all*; very long lines in any file are shown in pieces, so a single huge line can't freeze the viewer
-  - files over 60 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
+  - with Ace off, files over 60 lines open in **fast mode**: only the visible lines are drawn and only the cursor's line is a text field, so typing stays instant even with 17,000-line geometry files (selection works within a line; ⋮ → Copy all copies everything)
   - the suggestion popup follows the editor's text size; suggestions are worked out in the background so typing never waits for them
   - **UUID** key above the keyboard (and ⋮ → Insert random UUID) types a fresh random UUID; Settings → Code editor → Generate random UUID copies one
   - extra keys above the keyboard (Tab, arrows, `{ } ( ) ; = < > /`…), word wrap and font size in the ⋮ menu
@@ -66,7 +67,7 @@ Every file type gets its own pixel-art icon, VS Code style (JS, PY, KT, PDF, DOC
 - **Icon colours** (Settings): *Theme colour* tints every icon with the accent; *Colourful* gives each type its own colour.
 - Icons are text files in `app/src/main/assets/icons/*.txt`. Each character is one pixel, and the header of each file explains the colours (`@accent`, `@type`, `#RRGGBB`, `*0.5` darker, `+0.5` lighter).
 - **On the phone, without rebuilding:** Settings → *Copy icons* copies them all to `Internal storage/AbyssalFiles/icons/`. Edit any `.txt` there (the built-in editor works), or drop a `name.png` with the same name, then Settings → *Reload icons*.
-- Languages, keywords and snippets live in `CodeLang.kt` (`Langs`); the editor itself is `CodeEditor.kt`; Bedrock mode data (Script API types, events, add-on JSON schema) is in `Bedrock.kt`.
+- Languages, keywords and snippets live in `CodeLang.kt` (`Langs`); the editor is `AceEditor.kt` (Ace + bridge, page in `assets/ace/abyssal.js`) with `CodeEditor.kt` as the fallback; Bedrock mode data (Script API types, events, add-on JSON schema) is in `Bedrock.kt`.
 - `tools/gen_icons.py` regenerates all the default icons. It **overwrites** any edits you made to them.
 - `tools/gen_molang.py` regenerates the Molang data (`MolangData.kt`) from Microsoft's docs and Blockception's data.
 - Which icon a file gets is decided in `IconMap` (`Icons.kt`): by full name (`package.json`, `Dockerfile`…), then by extension, then by folder name.
